@@ -48,7 +48,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. `.venv\Scripts\python.exe -m unittest discover -s tests -v` with `LOCALAPPDATA` set to the installed aria2 location required elevated filesystem access and ran 22 tests in 96.784 seconds; all passed without skips. The controlled local tracker test verified successful sync, deduplication/validation, failure on HTTP 503 and empty content, and retention of the last valid cache. The real aria2 1.37.0 torrent gate used generated lawful test data and a known local aria2 seeder: `.torrent` and magnet downloads completed with matching SHA-256, both entered seeding, the `.torrent` task paused and resumed, and aria2's global tracker option contained the controlled tracker. The full suite also reran Phase 1/2 HTTP, FTP, restart, forced-exit, UI, and unit checks. Runtime tracker lists are not bundled because the upstream repository identifies its lists as GPL-2.0; downstream redistribution obligations need review before shipping lists. aria2 docs specify that `--seed-time=0` disables seeding, so the configured finite cap is 1440 minutes.
 
-**Local commit:** `5b9487c51e11af215aef3a2ec4df110183101089` (`feat(torrents): implement Phase 3 torrent and tracker workflows`).
+**Local commit:** `7ecf19d3a904e5e95fe22d31a717c997bb49f2e3` (`feat(torrents): implement Phase 3 torrent and tracker workflows`).
 
 ## Phase 4 - Settings, notifications, and desktop polish - NOT STARTED
 
