@@ -768,7 +768,9 @@ class FetchDeckWindow(QMainWindow):
 
     def _open_dashboard(self) -> None:
         if self.dashboard_server is None:
+            frozen_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
             candidates = [
+                frozen_root / "dashboard",
                 Path(sys.executable).resolve().parent / "dashboard",
                 Path(__file__).resolve().parents[2] / "apps" / "dashboard" / "out",
             ]

@@ -39,3 +39,5 @@ npm run build --workspace @fetchdeck/website
 ```
 
 The dashboard export is written to `apps/dashboard/out`; the desktop **Dashboard** button serves that folder with a read-only API on `127.0.0.1` while the local page is open. The public website export is written separately to `apps/website/out`. It has no configured canonical domain yet. When a public domain is selected, set `$env:NEXT_PUBLIC_SITE_URL='https://your-domain.example'` before building to add canonical and absolute Open Graph/Twitter preview URLs. The branded preview image is `apps/website/public/og-image.png`. The Windows installer action remains disabled until a verified package has a public URL.
+
+Windows package build instructions are in [docs/packaging.md](docs/packaging.md). The user guide is [docs/using-fetchdeck.md](docs/using-fetchdeck.md); license review items are in [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md).

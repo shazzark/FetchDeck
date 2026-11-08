@@ -91,11 +91,20 @@ Public-site browser check: the production export rendered at desktop and 390-pix
 
 **Dependencies:** Phase 4 complete. Phase 6 packaging must include `apps/dashboard/out`; the public website remains a separate export and has not been deployed.
 
-## Phase 6 - Windows packaging and release readiness - NOT STARTED
+## Phase 6 - Windows packaging and release readiness - BLOCKED
 
-- [ ] Build a reproducible Windows package with the Phase 5 dashboard static export and third-party notices.
-- [ ] Document aria2 as an external runtime dependency unless redistribution obligations are addressed.
-- [ ] Verify launch without host Python or Node, real supported workflows, app-data upgrades, and child-process cleanup.
-- [ ] Update supported-feature, troubleshooting, usage docs, and create local release artifacts.
+- [x] Add a pinned PyInstaller build requirement and repeatable PowerShell one-folder build script, including the Phase 5 dashboard export.
+- [x] Include PySide6, Shiboken6, PyInstaller notices and document Qt, npm asset, and aria2 redistribution review items.
+- [x] Add Windows package setup, user, feature, and troubleshooting documentation; create a local portable ZIP from the package.
+- [x] On this Windows 11 machine, launch the package with Python and Node removed from PATH and aria2 supplied externally; verify the engine-ready screen.
+- [x] Through the packaged UI, download a controlled local 1 MiB HTTP file and compare its SHA-256 with the source.
+- [x] Open the packaged dashboard; verify the static page and aggregate stats API respond from the app's loopback server.
+- [x] Close the packaged app and verify its aria2 child exits. Use isolated temporary app data so the existing desktop session remains untouched.
+- [ ] On a clean Windows environment, verify first launch, user-data upgrade preservation, packaged resume/recovery, torrent behavior, Windows notifications, and child cleanup.
+- [ ] Complete third-party release-license review for the PyInstaller bundle and dashboard browser assets before public distribution.
 
-**Verification:** PyInstaller 6.22.3 is installed in `.venv`; no package has been built. **Dependencies:** Phase 5 production dashboard export and clean Windows verification environment. Public site is separately deployable and is not part of the desktop package.
+**Observed verification:** `.\scripts\build_windows.ps1` built a Windows one-folder package with PyInstaller 6.22.3 using the installed Python 3.13.7 runtime. PyInstaller's default `_internal` resource directory was handled by resolving the dashboard from `sys._MEIPASS`; the first package smoke launch also exposed a standalone-relative-import issue, fixed with `scripts/launcher.py`. The package contains `FetchDeck.exe`, `THIRD-PARTY-NOTICES.md`, `licenses/`, and the Phase 5 dashboard under `_internal/dashboard`; the build script creates `dist\FetchDeck-windows-x64.zip`. Running the package with PATH limited to Windows system folders plus the external aria2 install showed `aria2 1.37.0 is running`. A controlled 1 MiB local HTTP download through the package UI completed with a matching SHA-256. The packaged Dashboard button served the production page and `/api/v1/stats` from loopback, with no source URL field in the response. A graceful window close exited the package and its aria2 child. Build outputs remain ignored under `dist/` and are local only.
+
+**Blocker / next action:** A separate clean Windows VM or machine is not available in this workspace. Run `dist\FetchDeck\FetchDeck.exe` there with aria2 installed and Python/Node absent; test first launch, upgrade against existing `%LOCALAPPDATA%\FetchDeck`, an interrupted/resumed download, a controlled torrent, completion/failure notifications, dashboard, and child-process cleanup. Record that evidence here before changing Phase 6 to COMPLETE. Before enabling a public installer link, review redistribution requirements for Qt shared libraries and the bundled npm assets and finalize their notices. The public site remains undeployed and has no selected domain.
+
+**Local package artifact:** `dist\FetchDeck\FetchDeck.exe` and `dist\FetchDeck-windows-x64.zip` (ignored by Git). **Local commit:** pending final review.
