@@ -26,8 +26,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .engine import EngineWorker
+from .engine import EngineWorker, is_magnet_uri
 from .paths import AppPaths
+from .trackers import TrackerError, TrackerListStore, TrackerSyncWorker
 
 
 def validate_download_url(value: str) -> str:
@@ -67,13 +68,28 @@ def format_bytes(value: str | int) -> str:
     return f"{size:.1f} TB"
 
 
+def task_display_status(task: dict[str, Any]) -> str:
+    if task.get("_fetchdeckStatus"):
+        return task["_fetchdeckStatus"]
+    return "Queued" if task.get("status") == "waiting" else str(task.get("status", "unknown")).capitalize()
+
+
+def validate_download_source(value: str) -> str:
+    source = value.strip()
+    if source.lower().startswith("magnet:"):
+        if not is_magnet_uri(source):
+            raise ValueError("Enter a valid magnet link containing a BitTorrent info hash.")
+        return source
+    return validate_download_url(source)
+
+
 class AddDownloadDialog(QDialog):
     def __init__(self, default_folder: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add download")
         self.setMinimumWidth(520)
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://example.com/file.zip or ftp://example.com/file.zip")
+        self.url_input.setPlaceholderText("https://example.com/file.zip, ftp://… or magnet link")
         self.folder_input = QLineEdit(str(default_folder))
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
@@ -103,7 +119,7 @@ class AddDownloadDialog(QDialog):
 
     def _accept(self) -> None:
         try:
-            validate_download_url(self.url_input.text())
+            validate_download_source(self.url_input.text())
             folder_text = self.folder_input.text().strip()
             if not folder_text:
                 raise ValueError("Choose a save folder.")
@@ -116,7 +132,7 @@ class AddDownloadDialog(QDialog):
         self.accept()
 
     def values(self) -> tuple[str, Path]:
-        return validate_download_url(self.url_input.text()), Path(self.folder_input.text().strip()).expanduser()
+        return validate_download_source(self.url_input.text()), Path(self.folder_input.text().strip()).expanduser()
 
 
 class FetchDeckWindow(QMainWindow):
@@ -126,6 +142,8 @@ class FetchDeckWindow(QMainWindow):
         super().__init__()
         self.paths = AppPaths.current_user()
         self.default_folder = self.paths.default_download_dir
+        self.tracker_store = TrackerListStore(self.paths.trackers)
+        self.tracker_sync_worker: TrackerSyncWorker | None = None
         self.setWindowTitle("FetchDeck")
         self.resize(1100, 700)
 
@@ -135,7 +153,7 @@ class FetchDeckWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.pages.addWidget(self._downloads_page())
         self.pages.addWidget(self._placeholder_page("Settings", "Settings will be available in Phase 4."))
-        self.pages.addWidget(self._placeholder_page("Trackers", "Tracker management will be available in Phase 3."))
+        self.pages.addWidget(self._trackers_page())
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.navigation.setCurrentRow(0)
 
@@ -148,6 +166,7 @@ class FetchDeckWindow(QMainWindow):
         self.worker = EngineWorker(self.paths)
         self.worker.ready.connect(self._engine_ready)
         self.worker.error.connect(self._engine_error)
+        self.worker.notice.connect(self._engine_notice)
         self.worker.snapshot.connect(self._show_snapshot)
         self.worker.action_finished.connect(self._action_finished)
         self.worker.start()
@@ -161,6 +180,36 @@ class FetchDeckWindow(QMainWindow):
         layout.addStretch()
         return page
 
+    def _trackers_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(QLabel("FETCHDECK  /  TRACKERS"))
+        layout.addWidget(QLabel("Sync a community list. Changes apply to new BitTorrent tasks."))
+
+        controls = QHBoxLayout()
+        self.tracker_kind = QComboBox()
+        self.tracker_kind.addItems(["best", "all"])
+        self.sync_trackers_button = QPushButton("Sync list")
+        self.apply_trackers_button = QPushButton("Apply saved list")
+        self.sync_trackers_button.clicked.connect(self._sync_trackers)
+        self.apply_trackers_button.clicked.connect(self._apply_trackers)
+        controls.addWidget(self.tracker_kind)
+        controls.addWidget(self.sync_trackers_button)
+        controls.addWidget(self.apply_trackers_button)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        self.tracker_status = QLabel()
+        self.tracker_status.setWordWrap(True)
+        layout.addWidget(self.tracker_status)
+        self.tracker_list = QListWidget()
+        layout.addWidget(self.tracker_list, 1)
+        try:
+            self._show_trackers(self.tracker_store.read())
+        except TrackerError as exc:
+            self.tracker_status.setText(str(exc))
+        return page
+
     def _downloads_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -168,6 +217,7 @@ class FetchDeckWindow(QMainWindow):
 
         toolbar = QHBoxLayout()
         self.add_button = QPushButton("Add download")
+        self.add_torrent_button = QPushButton("Add .torrent")
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
         self.remove_button = QPushButton("Remove")
@@ -176,6 +226,7 @@ class FetchDeckWindow(QMainWindow):
         self.pause_all_button = QPushButton("Pause all")
         self.resume_all_button = QPushButton("Resume all")
         self.add_button.setEnabled(False)
+        self.add_torrent_button.setEnabled(False)
         for button in (
             self.pause_button,
             self.resume_button,
@@ -187,6 +238,7 @@ class FetchDeckWindow(QMainWindow):
         ):
             button.setEnabled(False)
         self.add_button.clicked.connect(self._add_download)
+        self.add_torrent_button.clicked.connect(self._add_torrent)
         self.pause_button.clicked.connect(lambda: self._task_action("pause"))
         self.resume_button.clicked.connect(lambda: self._task_action("resume"))
         self.remove_button.clicked.connect(self._remove_download)
@@ -196,6 +248,7 @@ class FetchDeckWindow(QMainWindow):
         self.resume_all_button.clicked.connect(lambda: self.worker.submit("resume_all"))
         for button in (
             self.add_button,
+            self.add_torrent_button,
             self.pause_button,
             self.resume_button,
             self.remove_button,
@@ -212,7 +265,9 @@ class FetchDeckWindow(QMainWindow):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search downloads")
         self.status_filter = QComboBox()
-        self.status_filter.addItems(["All statuses", "Active", "Queued", "Paused", "Complete", "Failed"])
+        self.status_filter.addItems([
+            "All statuses", "Active", "Queued", "Paused", "Complete", "Failed", "Fetching metadata", "Seeding"
+        ])
         self.search_input.textChanged.connect(self._apply_filters)
         self.status_filter.currentTextChanged.connect(self._apply_filters)
         filter_row.addWidget(self.search_input, 1)
@@ -238,21 +293,85 @@ class FetchDeckWindow(QMainWindow):
     def _engine_ready(self, version: str) -> None:
         self.engine_status.setText(f"aria2 {version} is running.")
         self.add_button.setEnabled(True)
+        self.add_torrent_button.setEnabled(True)
         self.pause_all_button.setEnabled(True)
         self.resume_all_button.setEnabled(True)
 
     def _engine_error(self, message: str) -> None:
         self.engine_status.setText(f"Engine unavailable: {message}")
         self.add_button.setEnabled(False)
+        self.add_torrent_button.setEnabled(False)
         self.pause_all_button.setEnabled(False)
         self.resume_all_button.setEnabled(False)
+
+    def _engine_notice(self, message: str) -> None:
+        self.statusBar().showMessage(message, 10000)
 
     def _add_download(self) -> None:
         dialog = AddDownloadDialog(self.default_folder, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         url, folder = dialog.values()
-        self.worker.submit("add", url, folder)
+        action = "add_magnet" if url.lower().startswith("magnet:") else "add"
+        self.worker.submit(action, url, folder)
+
+    def _add_torrent(self) -> None:
+        torrent_path, _selected_filter = QFileDialog.getOpenFileName(
+            self, "Choose a torrent file", str(self.default_folder), "Torrent files (*.torrent)"
+        )
+        if not torrent_path:
+            return
+        folder = QFileDialog.getExistingDirectory(self, "Choose a save folder", str(self.default_folder))
+        if folder:
+            self.worker.submit("add_torrent", Path(torrent_path), Path(folder))
+
+    def _show_trackers(self, trackers: list[str]) -> None:
+        self.tracker_list.clear()
+        self.tracker_list.addItems(trackers)
+        if trackers:
+            self.tracker_status.setText(f"{len(trackers)} trackers saved locally.")
+            self.apply_trackers_button.setEnabled(True)
+        else:
+            self.tracker_status.setText("No cached tracker list. Sync the best or all community list.")
+            self.apply_trackers_button.setEnabled(False)
+
+    def _sync_trackers(self) -> None:
+        if self.tracker_sync_worker and self.tracker_sync_worker.isRunning():
+            return
+        kind = self.tracker_kind.currentText()
+        worker = TrackerSyncWorker(self.tracker_store, kind)
+        self.tracker_sync_worker = worker
+        worker.completed.connect(self._trackers_synced)
+        worker.failed.connect(self._trackers_failed)
+        worker.finished.connect(self._tracker_sync_finished)
+        self.sync_trackers_button.setEnabled(False)
+        self.tracker_status.setText(f"Syncing the {kind} tracker list…")
+        worker.start()
+
+    def _trackers_synced(self, trackers: list[str]) -> None:
+        self._show_trackers(trackers)
+        self.tracker_status.setText(f"Synced and saved {len(trackers)} trackers. Applying to new BitTorrent tasks…")
+        self.worker.submit("set_trackers", trackers)
+
+    def _trackers_failed(self, message: str) -> None:
+        try:
+            self._show_trackers(self.tracker_store.read())
+        except TrackerError:
+            pass
+        self.tracker_status.setText(message)
+
+    def _tracker_sync_finished(self) -> None:
+        self.sync_trackers_button.setEnabled(True)
+        self.tracker_sync_worker = None
+
+    def _apply_trackers(self) -> None:
+        try:
+            trackers = self.tracker_store.read()
+        except TrackerError as exc:
+            self.tracker_status.setText(str(exc))
+            return
+        if trackers:
+            self.worker.submit("set_trackers", trackers)
 
     def _selected_tasks(self) -> list[tuple[str, str, str]]:
         selected = []
@@ -347,16 +466,18 @@ class FetchDeckWindow(QMainWindow):
         query = self.search_input.text().strip().casefold()
         filter_value = self.status_filter.currentText()
         status_groups = {
-            "Active": {"active"},
-            "Queued": {"waiting"},
-            "Paused": {"paused"},
-            "Complete": {"complete"},
-            "Failed": {"error"},
+            "Active": {"Active"},
+            "Queued": {"Queued"},
+            "Paused": {"Paused"},
+            "Complete": {"Complete"},
+            "Failed": {"Error"},
+            "Fetching metadata": {"Fetching metadata"},
+            "Seeding": {"Seeding"},
         }
         wanted = status_groups.get(filter_value)
         for row in range(self.table.rowCount()):
             name = self.table.item(row, 0).text().casefold()
-            status = self.table.item(row, 1).text().casefold()
+            status = self.table.item(row, 1).text()
             self.table.setRowHidden(row, bool((query and query not in name) or (wanted and status not in wanted)))
 
     def _selection_changed(self) -> None:
@@ -382,7 +503,7 @@ class FetchDeckWindow(QMainWindow):
             error = task.get("errorMessage", "") or ""
             values = (
                 task_name(task),
-                status.capitalize(),
+                task_display_status(task),
                 progress,
                 format_bytes(completed),
                 format_bytes(total) if total else "Unknown",
@@ -418,6 +539,11 @@ class FetchDeckWindow(QMainWindow):
             self.statusBar().showMessage(message or "The download action failed.", 8000)
 
     def closeEvent(self, event: Any) -> None:
+        if self.tracker_sync_worker and self.tracker_sync_worker.isRunning():
+            if not self.tracker_sync_worker.wait(10_500):
+                self.tracker_status.setText("Tracker sync is still running. Try closing FetchDeck again.")
+                event.ignore()
+                return
         self.worker.requestInterruption()
         if self.worker.isRunning() and not self.worker.wait(6500):
             self.engine_status.setText("aria2 is still shutting down. Try closing FetchDeck again.")

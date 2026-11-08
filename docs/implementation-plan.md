@@ -45,11 +45,11 @@ Inspected the public `missuo/motrix-gpui` source at commit `a26c3a9116375b45d941
 ## Phase 3 — Torrents and tracker management
 
 - **Goal:** Add BitTorrent and maintain usable tracker configuration.
-- **Scope:** Magnet and `.torrent` tasks including metadata fetch, transfer, seeding, pause, and errors; permitted bundled tracker data; sync upstream community best/all lists and retain last usable list on failure; DHT/PEX/seeding defaults and existing-versus-future task behavior.
+- **Scope:** Magnet and `.torrent` tasks including metadata fetch, transfer, seeding, pause, and errors; runtime sync of upstream community best/all tracker lists with an app-owned last-good cache; DHT and peer exchange enabled; seeding capped at a 1.0 ratio or 1440 minutes, whichever comes first. Tracker changes use aria2 global options and affect new BitTorrent tasks, not existing ones.
 - **Exclusions:** Browser integration, plugins, CLI integration, dashboard write actions, and unverified redistribution of third-party assets.
-- **Dependencies:** Phase 2 complete; real aria2 BitTorrent support; licensing review for tracker data; controlled lawful torrent and known seeder.
+- **Dependencies:** Phase 2 complete; real aria2 BitTorrent support; controlled lawful torrent and known seeder. The upstream tracker-list repository identifies its data as GPL-2.0, so FetchDeck does not bundle the lists; users can sync them at runtime. Review release obligations before distributing cached data.
 - **Acceptance criteria:** Magnet and torrent tasks function; tracker sync safely replaces data only after successful validation; failure preserves last good list; settings application scope is clear.
-- **Verification:** Real lawful torrent and magnet with matching hashes; seeding and pause behavior; successful and failed tracker sync. Mock-only provider tests do not pass the gate.
+- **Verification:** Real lawful controlled torrent and magnet with matching SHA-256; seeding and pause behavior; successful and failed tracker sync with last-good cache retention. Mock-only provider tests do not pass the gate.
 
 ## Phase 4 — Settings, notifications, and desktop polish
 

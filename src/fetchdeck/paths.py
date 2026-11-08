@@ -32,9 +32,18 @@ class AppPaths:
         return self.root / "aria2.lock"
 
     @property
+    def trackers(self) -> Path:
+        return self.root / "trackers.txt"
+
+    @property
+    def torrent_metadata(self) -> Path:
+        return self.root / "torrent-metadata"
+
+    @property
     def default_download_dir(self) -> Path:
         downloads = Path.home() / "Downloads"
         return downloads if downloads.is_dir() else Path.home()
 
     def prepare(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
+        self.torrent_metadata.mkdir(parents=True, exist_ok=True)

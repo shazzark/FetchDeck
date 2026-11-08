@@ -7,7 +7,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from fetchdeck.app import format_bytes, task_name, validate_download_url
+from fetchdeck.app import format_bytes, task_name, validate_download_source, validate_download_url
 from fetchdeck.engine import Aria2Rpc, EngineError, InstanceLock
 
 
@@ -34,6 +34,12 @@ class FetchDeckUnitTests(unittest.TestCase):
         self.assertEqual(validate_download_url("  https://example.test/archive.zip  "), "https://example.test/archive.zip")
         self.assertEqual(validate_download_url("http://127.0.0.1:8080/file"), "http://127.0.0.1:8080/file")
         self.assertEqual(validate_download_url("ftp://example.test/file.zip"), "ftp://example.test/file.zip")
+
+    def test_accepts_valid_magnets_and_rejects_magnets_without_hashes(self):
+        magnet = "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=test.iso"
+        self.assertEqual(validate_download_source(magnet), magnet)
+        with self.assertRaises(ValueError):
+            validate_download_source("magnet:?dn=missing-hash")
 
     def test_rejects_unsupported_and_credential_bearing_links(self):
         for url in ("magnet:?xt=urn:btih:abc", "https:///missing-host", "https://user:pass@example.test/file"):

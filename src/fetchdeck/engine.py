@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import base64
 import json
 import os
 import secrets
@@ -15,12 +16,13 @@ import uuid
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from PySide6.QtCore import QThread, Signal
 
 from .filesystem import move_to_recycle_bin
 from .paths import AppPaths
+from .trackers import TrackerError, TrackerListStore
 
 
 class EngineError(RuntimeError):
@@ -200,13 +202,19 @@ class Aria2Daemon:
                 f"--rpc-listen-port={port}",
                 "--rpc-listen-all=false",
                 f"--rpc-secret={secret}",
-                "--dir=" + str(paths.default_download_dir),
+                "--dir=" + str(paths.torrent_metadata),
                 f"--input-file={paths.aria2_session}",
                 f"--save-session={paths.aria2_session}",
                 "--save-session-interval=1",
                 "--auto-save-interval=3",
                 "--continue=true",
                 "--always-resume=true",
+                "--enable-dht=true",
+                "--enable-peer-exchange=true",
+                "--bt-save-metadata=true",
+                "--rpc-save-upload-metadata=true",
+                "--seed-time=1440",
+                "--seed-ratio=1.0",
                 "--allow-overwrite=false",
                 "--auto-file-renaming=true",
                 f"--max-concurrent-downloads={max_concurrent_downloads}",
@@ -280,6 +288,7 @@ class Aria2Daemon:
 class EngineWorker(QThread):
     ready = Signal(str)
     error = Signal(str)
+    notice = Signal(str)
     snapshot = Signal(list)
     action_finished = Signal(str, bool, str)
 
@@ -326,6 +335,12 @@ class EngineWorker(QThread):
             return
 
         self.ready.emit(self._daemon.version)
+        try:
+            trackers = TrackerListStore(self.paths.trackers).read()
+            if trackers:
+                self._daemon.rpc.call("changeGlobalOption", [{"bt-tracker": ",".join(trackers)}])
+        except (EngineError, TrackerError) as exc:
+            self.notice.emit(f"The saved tracker list could not be applied: {exc}")
         next_poll = 0.0
         last_error = ""
         try:
@@ -368,6 +383,26 @@ class EngineWorker(QThread):
             gid = str(rpc.call("addUri", [[url], {"dir": str(folder)}]))
             self._task_destinations[gid] = (Path(folder), output_name_for_uri(url))
             self._task_sources[gid] = url
+            return gid
+        elif name == "add_magnet":
+            magnet, folder = args
+            if not is_magnet_uri(magnet):
+                raise EngineError("Enter a valid BitTorrent magnet link with an info hash.")
+            gid = str(rpc.call("addUri", [[magnet], {"dir": str(folder)}]))
+            self._task_destinations[gid] = (Path(folder), output_name_for_uri(magnet))
+            self._task_sources[gid] = magnet
+            return gid
+        elif name == "add_torrent":
+            torrent_path, folder = args
+            try:
+                torrent_bytes = Path(torrent_path).read_bytes()
+            except OSError as exc:
+                raise EngineError("FetchDeck could not read the selected .torrent file.") from exc
+            if not torrent_bytes or len(torrent_bytes) > 16 * 1024 * 1024:
+                raise EngineError("Choose a non-empty .torrent file smaller than 16 MiB.")
+            gid = str(rpc.call("addTorrent", [base64.b64encode(torrent_bytes).decode("ascii"), [], {"dir": str(folder)}]))
+            self._task_destinations[gid] = (Path(folder), "")
+            return gid
         elif name == "pause":
             try:
                 rpc.call("pause", [args[0]])
@@ -394,6 +429,11 @@ class EngineWorker(QThread):
             rpc.call("pauseAll")
         elif name == "resume_all":
             rpc.call("unpauseAll")
+        elif name == "set_trackers":
+            trackers = args[0]
+            if not isinstance(trackers, list) or not trackers:
+                raise EngineError("Sync a usable tracker list before applying it.")
+            rpc.call("changeGlobalOption", [{"bt-tracker": ",".join(trackers)}])
         elif name == "restart":
             gid, overwrite = args
             task = rpc.call("tellStatus", [gid, ["files"]])
@@ -463,6 +503,12 @@ class EngineWorker(QThread):
             "totalLength",
             "completedLength",
             "downloadSpeed",
+            "uploadSpeed",
+            "seeder",
+            "numSeeders",
+            "numPeers",
+            "infoHash",
+            "followedBy",
             "errorCode",
             "errorMessage",
             "files",
@@ -491,6 +537,13 @@ class EngineWorker(QThread):
             source = next((entry.get("uri") for entry in uris if entry.get("uri")), None)
             if source:
                 self._task_sources[task.get("gid", "")] = source
+            source = source or self._task_sources.get(task.get("gid", ""), "")
+            if source.lower().startswith("magnet:"):
+                task["_fetchdeckType"] = "magnet"
+                if task.get("status") == "active" and int(task.get("totalLength", 0) or 0) == 0:
+                    task["_fetchdeckStatus"] = "Fetching metadata"
+            if task.get("seeder") == "true" and task.get("status") == "active":
+                task["_fetchdeckStatus"] = "Seeding"
             if task.get("gid") in self._ftp_resume_attempts and task.get("status") == "error":
                 task["errorMessage"] = (
                     "The FTP server could not resume this partial download. "
@@ -515,7 +568,21 @@ def available_output_name(folder: Path, filename: str) -> str:
 
 def output_name_for_uri(uri: str) -> str:
     parsed = urlsplit(uri)
+    if parsed.scheme.lower() == "magnet":
+        name = next((value for key, value in parse_qsl(parsed.query) if key == "dn"), "")
+        return unquote(name) or "BitTorrent download"
     return unquote(Path(parsed.path).name) or parsed.hostname or "Download"
+
+
+def is_magnet_uri(uri: str) -> bool:
+    try:
+        parsed = urlsplit(uri.strip())
+        return parsed.scheme.lower() == "magnet" and any(
+            key == "xt" and value.lower().startswith(("urn:btih:", "urn:btmh:"))
+            for key, value in parse_qsl(parsed.query)
+        )
+    except ValueError:
+        return False
 
 
 def parse_session_entries(session_text: str) -> dict[str, tuple[str, Path, str]]:

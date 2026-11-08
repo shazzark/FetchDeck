@@ -39,14 +39,16 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 
 
-## Phase 3 - Torrents and tracker management - NOT STARTED
+## Phase 3 - Torrents and tracker management - COMPLETE
 
-- [ ] Magnet and `.torrent` workflows.
-- [ ] Licensed tracker list and resilient sync/apply behavior.
-- [ ] DHT/PEX/seeding defaults and scope documented.
-- [ ] Real lawful torrent/magnet, hash, seeding, pause, and sync success/failure gate.
+- [x] Add magnet and `.torrent` workflows, metadata status, transfer, pause, and seeding display.
+- [x] Sync best/all community lists in a worker; validate entries, write atomically, and retain the last usable list after fetch/validation failures.
+- [x] Enable DHT/PEX and set seeding to a 1.0 ratio or 1440-minute cap; document that tracker changes apply to new BitTorrent tasks only.
+- [x] Verify a controlled lawful torrent and magnet against a known local seeder, compare hashes, pause/resume seeding, and exercise tracker sync success/failure.
 
-**Verification:** Not run. **Blockers:** Phase 2 is complete; tracker redistribution review and the lawful controlled torrent/magnet seeder gate are prerequisites.
+**Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. `.venv\Scripts\python.exe -m unittest discover -s tests -v` with `LOCALAPPDATA` set to the installed aria2 location required elevated filesystem access and ran 22 tests in 96.784 seconds; all passed without skips. The controlled local tracker test verified successful sync, deduplication/validation, failure on HTTP 503 and empty content, and retention of the last valid cache. The real aria2 1.37.0 torrent gate used generated lawful test data and a known local aria2 seeder: `.torrent` and magnet downloads completed with matching SHA-256, both entered seeding, the `.torrent` task paused and resumed, and aria2's global tracker option contained the controlled tracker. The full suite also reran Phase 1/2 HTTP, FTP, restart, forced-exit, UI, and unit checks. Runtime tracker lists are not bundled because the upstream repository identifies its lists as GPL-2.0; downstream redistribution obligations need review before shipping lists. aria2 docs specify that `--seed-time=0` disables seeding, so the configured finite cap is 1440 minutes.
+
+**Local commit:** `5b9487c51e11af215aef3a2ec4df110183101089` (`feat(torrents): implement Phase 3 torrent and tracker workflows`).
 
 ## Phase 4 - Settings, notifications, and desktop polish - NOT STARTED
 
@@ -55,7 +57,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 - [ ] Keyboard shortcuts, clear states, and quit warning.
 - [ ] Reopen, real notification, and active-work quit gate.
 
-**Verification:** Not run. **Blockers:** Phase 3.
+**Verification:** Not run. **Blockers:** Phase 3 complete.
 
 ## Phase 5 - Local Next.js and TypeScript dashboard - NOT STARTED
 
