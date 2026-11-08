@@ -1,11 +1,14 @@
 import sys
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from typing import Any
 
 from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QComboBox,
@@ -20,6 +23,9 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QStackedWidget,
+    QSpinBox,
+    QStyle,
+    QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -27,7 +33,9 @@ from PySide6.QtWidgets import (
 )
 
 from .engine import EngineWorker, is_magnet_uri
+from .notifications import NotificationStore
 from .paths import AppPaths
+from .preferences import Preferences, PreferencesStore, validate_preferences
 from .trackers import TrackerError, TrackerListStore, TrackerSyncWorker
 
 
@@ -141,7 +149,25 @@ class FetchDeckWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.paths = AppPaths.current_user()
-        self.default_folder = self.paths.default_download_dir
+        self.preferences_store = PreferencesStore(self.paths.preferences, self.paths.default_download_dir)
+        try:
+            self.preferences = self.preferences_store.load()
+            self.preferences_error = ""
+        except ValueError as exc:
+            self.preferences = Preferences.defaults(self.paths.default_download_dir)
+            self.preferences_error = str(exc)
+        saved_folder = Path(self.preferences.default_folder).expanduser()
+        self.default_folder = saved_folder if saved_folder.is_dir() else self.paths.default_download_dir
+        self.preferences = replace(self.preferences, default_folder=str(self.default_folder))
+        self.notification_store = NotificationStore(self.paths.notifications)
+        try:
+            self.notification_events = self.notification_store.load()
+        except ValueError:
+            self.notification_events = []
+        self._known_task_status: dict[str, str] = {}
+        self._has_snapshot = False
+        self._latest_tasks: list[dict[str, Any]] = []
+        self._engine_preferences = self.preferences
         self.tracker_store = TrackerListStore(self.paths.trackers)
         self.tracker_sync_worker: TrackerSyncWorker | None = None
         self.setWindowTitle("FetchDeck")
@@ -152,7 +178,7 @@ class FetchDeckWindow(QMainWindow):
         self.navigation.setFixedWidth(180)
         self.pages = QStackedWidget()
         self.pages.addWidget(self._downloads_page())
-        self.pages.addWidget(self._placeholder_page("Settings", "Settings will be available in Phase 4."))
+        self.pages.addWidget(self._settings_page())
         self.pages.addWidget(self._trackers_page())
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.navigation.setCurrentRow(0)
@@ -163,13 +189,155 @@ class FetchDeckWindow(QMainWindow):
         shell_layout.addWidget(self.pages, 1)
         self.setCentralWidget(shell)
 
-        self.worker = EngineWorker(self.paths)
+        self.worker = EngineWorker(self.paths, preferences=self.preferences)
         self.worker.ready.connect(self._engine_ready)
         self.worker.error.connect(self._engine_error)
         self.worker.notice.connect(self._engine_notice)
         self.worker.snapshot.connect(self._show_snapshot)
         self.worker.action_finished.connect(self._action_finished)
         self.worker.start()
+        self._apply_theme(self.preferences.theme)
+        self.tray_icon = QSystemTrayIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), self)
+        self.tray_icon.setToolTip("FetchDeck")
+        tray_menu = QMenu(self)
+        tray_menu.addAction("Show FetchDeck", self.showNormal)
+        tray_menu.addAction("Quit", self.close)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(lambda _reason: self.showNormal())
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray_icon.show()
+        self._install_shortcuts()
+
+    def _settings_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(QLabel("FETCHDECK  /  SETTINGS"))
+        form = QFormLayout()
+        self.folder_setting = QLineEdit(self.preferences.default_folder)
+        choose_folder = QPushButton("Browse…")
+        choose_folder.clicked.connect(self._choose_default_folder)
+        folder_row = QHBoxLayout()
+        folder_row.addWidget(self.folder_setting, 1)
+        folder_row.addWidget(choose_folder)
+        form.addRow("Default download folder", folder_row)
+
+        self.concurrent_setting = QSpinBox()
+        self.concurrent_setting.setRange(1, 64)
+        self.concurrent_setting.setValue(self.preferences.max_concurrent_downloads)
+        form.addRow("Concurrent downloads", self.concurrent_setting)
+        self.connections_setting = QSpinBox()
+        self.connections_setting.setRange(1, 16)
+        self.connections_setting.setValue(self.preferences.connections_per_task)
+        form.addRow("Connections per task", self.connections_setting)
+        self.download_limit_setting = QSpinBox()
+        self.download_limit_setting.setRange(0, 10_000_000)
+        self.download_limit_setting.setSuffix(" KiB/s (0 = unlimited)")
+        self.download_limit_setting.setValue(self.preferences.download_limit_kib)
+        form.addRow("Download limit", self.download_limit_setting)
+        self.upload_limit_setting = QSpinBox()
+        self.upload_limit_setting.setRange(0, 10_000_000)
+        self.upload_limit_setting.setSuffix(" KiB/s (0 = unlimited)")
+        self.upload_limit_setting.setValue(self.preferences.upload_limit_kib)
+        form.addRow("Upload limit", self.upload_limit_setting)
+        self.user_agent_setting = QLineEdit(self.preferences.user_agent)
+        form.addRow("User-Agent", self.user_agent_setting)
+        self.theme_setting = QComboBox()
+        self.theme_setting.addItems(["System", "Light", "Dark"])
+        self.theme_setting.setCurrentText(self.preferences.theme)
+        form.addRow("Theme", self.theme_setting)
+        self.notify_complete_setting = QCheckBox("Notify when a download completes")
+        self.notify_complete_setting.setChecked(self.preferences.notify_complete)
+        form.addRow("Completion", self.notify_complete_setting)
+        self.notify_failure_setting = QCheckBox("Notify when a download fails")
+        self.notify_failure_setting.setChecked(self.preferences.notify_failure)
+        form.addRow("Failure", self.notify_failure_setting)
+        self.resume_launch_setting = QCheckBox("Resume unfinished downloads when FetchDeck starts")
+        self.resume_launch_setting.setChecked(self.preferences.resume_on_launch)
+        form.addRow("Launch behavior", self.resume_launch_setting)
+        self.warn_quit_setting = QCheckBox("Warn before quitting with active downloads")
+        self.warn_quit_setting.setChecked(self.preferences.warn_on_quit)
+        form.addRow("Quit behavior", self.warn_quit_setting)
+        layout.addLayout(form)
+
+        self.settings_note = QLabel(
+            "Concurrent downloads and connections per task take effect after restarting FetchDeck. "
+            "Speed limits and User-Agent apply while it is running. Theme and folder apply immediately."
+        )
+        self.settings_note.setWordWrap(True)
+        layout.addWidget(self.settings_note)
+        self.settings_status = QLabel(self.preferences_error)
+        self.settings_status.setWordWrap(True)
+        layout.addWidget(self.settings_status)
+        self.save_settings_button = QPushButton("Save settings")
+        self.save_settings_button.clicked.connect(self._save_settings)
+        layout.addWidget(self.save_settings_button)
+        layout.addStretch()
+        return page
+
+    def _choose_default_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Choose the default download folder", self.folder_setting.text())
+        if folder:
+            self.folder_setting.setText(folder)
+
+    def _settings_from_controls(self) -> Preferences:
+        return validate_preferences(Preferences(
+            default_folder=self.folder_setting.text().strip(),
+            max_concurrent_downloads=self.concurrent_setting.value(),
+            connections_per_task=self.connections_setting.value(),
+            download_limit_kib=self.download_limit_setting.value(),
+            upload_limit_kib=self.upload_limit_setting.value(),
+            user_agent=self.user_agent_setting.text().strip(),
+            theme=self.theme_setting.currentText(),
+            notify_complete=self.notify_complete_setting.isChecked(),
+            notify_failure=self.notify_failure_setting.isChecked(),
+            resume_on_launch=self.resume_launch_setting.isChecked(),
+            warn_on_quit=self.warn_quit_setting.isChecked(),
+        ))
+
+    def _save_settings(self) -> None:
+        try:
+            preferences = self._settings_from_controls()
+            if not Path(preferences.default_folder).expanduser().is_dir():
+                raise ValueError("Choose an existing default download folder.")
+            self.preferences_store.save(preferences)
+        except ValueError as exc:
+            self.settings_status.setText(str(exc))
+            return
+        self.preferences = preferences
+        self.default_folder = Path(preferences.default_folder).expanduser()
+        self._apply_theme(preferences.theme)
+        if self.worker.isRunning():
+            self.worker.submit("update_runtime_settings", preferences)
+        restart_needed = (
+            preferences.max_concurrent_downloads != self._engine_preferences.max_concurrent_downloads
+            or preferences.connections_per_task != self._engine_preferences.connections_per_task
+        )
+        self.settings_status.setText(
+            "Settings saved. Restart FetchDeck to apply concurrent download and connection changes."
+            if restart_needed else "Settings saved and applied."
+        )
+
+    def _apply_theme(self, theme: str) -> None:
+        if theme == "Dark":
+            QApplication.instance().setStyleSheet(
+                "QWidget { background: #20252b; color: #e8edf2; } "
+                "QLineEdit, QComboBox, QSpinBox, QTableWidget, QListWidget { background: #151a1f; }"
+            )
+        elif theme == "Light":
+            QApplication.instance().setStyleSheet(
+                "QWidget { background: #f5f7f9; color: #1b2733; } "
+                "QLineEdit, QComboBox, QSpinBox, QTableWidget, QListWidget { background: white; }"
+            )
+        else:
+            QApplication.instance().setStyleSheet("")
+
+    def _install_shortcuts(self) -> None:
+        shortcuts = (("Ctrl+N", self._add_download), ("Ctrl+O", self._add_torrent),
+                     ("Ctrl+P", lambda: self._task_action("pause")),
+                     ("Ctrl+R", lambda: self._task_action("resume")), ("Delete", self._remove_download))
+        for sequence, callback in shortcuts:
+            shortcut = QShortcut(sequence, self)
+            shortcut.activated.connect(callback)
 
     @staticmethod
     def _placeholder_page(title: str, note: str) -> QWidget:
@@ -277,6 +445,9 @@ class FetchDeckWindow(QMainWindow):
         self.engine_status = QLabel("Starting aria2…")
         self.engine_status.setWordWrap(True)
         layout.addWidget(self.engine_status)
+        self.downloads_state = QLabel("No downloads yet. Add a link or a .torrent file to get started.")
+        self.downloads_state.setWordWrap(True)
+        layout.addWidget(self.downloads_state)
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(["File", "Status", "Progress", "Transferred", "Total", "Speed", "Details"])
@@ -288,6 +459,11 @@ class FetchDeckWindow(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self._selection_changed)
         layout.addWidget(self.table, 1)
+        layout.addWidget(QLabel("Recent activity"))
+        self.notification_feed = QListWidget()
+        self.notification_feed.setMaximumHeight(130)
+        layout.addWidget(self.notification_feed)
+        self._refresh_notification_feed()
         return page
 
     def _engine_ready(self, version: str) -> None:
@@ -308,6 +484,8 @@ class FetchDeckWindow(QMainWindow):
         self.statusBar().showMessage(message, 10000)
 
     def _add_download(self) -> None:
+        if not self.add_button.isEnabled():
+            return
         dialog = AddDownloadDialog(self.default_folder, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -490,6 +668,21 @@ class FetchDeckWindow(QMainWindow):
         self.restart_button.setEnabled(len(selected) == 1)
 
     def _show_snapshot(self, tasks: list[dict[str, Any]]) -> None:
+        current_status = {task.get("gid", ""): task.get("status", "unknown") for task in tasks}
+        if self._has_snapshot:
+            for task in tasks:
+                gid = task.get("gid", "")
+                status = task.get("status", "")
+                if status in {"complete", "error"} and self._known_task_status.get(gid) != status:
+                    self._record_task_event(task, status)
+        self._known_task_status = current_status
+        self._has_snapshot = True
+        self._latest_tasks = tasks
+        self.downloads_state.setText(
+            "No downloads yet. Add a link or a .torrent file to get started."
+            if not tasks else "No downloads match the current search and filter."
+        )
+        self.downloads_state.setVisible(not tasks)
         selected_gids = {gid for gid, _status, _path in self._selected_tasks()}
         self.table.setRowCount(len(tasks))
         selected_rows = []
@@ -523,6 +716,8 @@ class FetchDeckWindow(QMainWindow):
                 selected_rows.append(row)
         self.table.resizeColumnsToContents()
         self._apply_filters()
+        if tasks and all(self.table.isRowHidden(row) for row in range(self.table.rowCount())):
+            self.downloads_state.setVisible(True)
         selection = self.table.selectionModel()
         selection.clearSelection()
         for row in selected_rows:
@@ -532,6 +727,34 @@ class FetchDeckWindow(QMainWindow):
             )
         self._selection_changed()
 
+    def _record_task_event(self, task: dict[str, Any], status: str) -> None:
+        completed = status == "complete"
+        if completed and not self.preferences.notify_complete:
+            return
+        if not completed and not self.preferences.notify_failure:
+            return
+        name = task_name(task)
+        title = "Download complete" if completed else "Download failed"
+        detail = name if completed else f"{name}: {task.get('errorMessage') or 'aria2 reported a failure.'}"
+        try:
+            event = self.notification_store.append("complete" if completed else "failure", title, detail)
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc), 8000)
+            return
+        self.notification_events.append(event)
+        self.notification_events = self.notification_events[-100:]
+        self._refresh_notification_feed()
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            icon = QSystemTrayIcon.MessageIcon.Information if completed else QSystemTrayIcon.MessageIcon.Warning
+            self.tray_icon.showMessage(title, detail, icon, 8000)
+
+    def _refresh_notification_feed(self) -> None:
+        if not hasattr(self, "notification_feed"):
+            return
+        self.notification_feed.clear()
+        for event in reversed(self.notification_events[-100:]):
+            self.notification_feed.addItem(f"{event['time']}  {event['title']} — {event['detail']}")
+
     def _action_finished(self, _action_id: str, success: bool, message: str) -> None:
         if success:
             self.statusBar().showMessage("Download updated.", 3000)
@@ -539,6 +762,18 @@ class FetchDeckWindow(QMainWindow):
             self.statusBar().showMessage(message or "The download action failed.", 8000)
 
     def closeEvent(self, event: Any) -> None:
+        active = [task for task in self._latest_tasks if task.get("status") in {"active", "waiting"}]
+        if active and self.preferences.warn_on_quit:
+            choice = QMessageBox.question(
+                self,
+                "Downloads are still active",
+                f"{len(active)} download(s) are active or queued. Quit FetchDeck? They will stop and be saved for the next launch.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if choice != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
         if self.tracker_sync_worker and self.tracker_sync_worker.isRunning():
             if not self.tracker_sync_worker.wait(10_500):
                 self.tracker_status.setText("Tracker sync is still running. Try closing FetchDeck again.")

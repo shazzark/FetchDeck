@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 
 from fetchdeck.engine import Aria2Daemon, EngineWorker
 from fetchdeck.paths import AppPaths
+from fetchdeck.preferences import Preferences
 
 
 PAYLOAD = bytes(index % 251 for index in range(8 * 1024 * 1024))
@@ -165,6 +167,74 @@ class Aria2ControlledServerTests(unittest.TestCase):
     def setUpClass(cls):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_saved_runtime_preferences_change_aria2_options(self):
+        with tempfile.TemporaryDirectory(prefix="fetchdeck-settings-") as directory:
+            root = Path(directory)
+            paths = AppPaths(root / "app-data")
+            preferences = replace(
+                Preferences.defaults(root), max_concurrent_downloads=3, connections_per_task=2,
+                download_limit_kib=1024, upload_limit_kib=256, user_agent="FetchDeck test-agent",
+            )
+            worker = EngineWorker(paths, preferences=preferences)
+            actions = {}
+            errors = []
+            versions = []
+            worker.action_finished.connect(lambda action_id, success, message: actions.__setitem__(action_id, (success, message)))
+            worker.error.connect(errors.append)
+            worker.ready.connect(versions.append)
+            worker.start()
+            try:
+                self.assertTrue(wait_until(lambda: versions or errors, 8), errors)
+                self.assertTrue(versions, errors)
+                options = worker._daemon.rpc.call("getGlobalOption")
+                self.assertEqual(options.get("max-concurrent-downloads"), "3")
+                self.assertEqual(options.get("max-connection-per-server"), "2")
+                changed = replace(preferences, download_limit_kib=2048, upload_limit_kib=512,
+                                  user_agent="FetchDeck updated-agent")
+                action_id = worker.submit("update_runtime_settings", changed)
+                self.assertTrue(wait_until(lambda: action_id in actions or errors, 6), errors)
+                self.assertTrue(actions[action_id][0], actions[action_id][1])
+                options = worker._daemon.rpc.call("getGlobalOption")
+                self.assertEqual(options.get("max-overall-download-limit"), str(2048 * 1024))
+                self.assertEqual(options.get("max-overall-upload-limit"), str(512 * 1024))
+                self.assertEqual(options.get("user-agent"), "FetchDeck updated-agent")
+            finally:
+                worker.requestInterruption()
+                worker.wait(6500)
+
+    def test_resume_disabled_restores_saved_jobs_paused(self):
+        with tempfile.TemporaryDirectory(prefix="fetchdeck-paused-launch-") as directory:
+            root = Path(directory)
+            save_dir = root / "downloads"
+            save_dir.mkdir()
+            paths = AppPaths(root / "app-data")
+            server = ThreadingHTTPServer(("127.0.0.1", 0), ControlledHandler)
+            server.daemon_threads = True
+            server.requests = []
+            server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+            server_thread.start()
+            source = f"http://127.0.0.1:{server.server_port}/launch-paused.bin"
+            paths.prepare()
+            paths.aria2_session.write_text(f"{source}\n dir={save_dir}\n out=launch-paused.bin\n\n", encoding="utf-8")
+            preferences = replace(Preferences.defaults(save_dir), resume_on_launch=False)
+            worker = EngineWorker(paths, preferences=preferences)
+            tasks = []
+            errors = []
+            worker.snapshot.connect(lambda current: tasks.__setitem__(slice(None), current))
+            worker.error.connect(errors.append)
+            worker.start()
+            try:
+                self.assertTrue(wait_until(lambda: any(task.get("status") == "paused" for task in tasks) or errors, 8), errors)
+                self.assertFalse(errors, errors)
+                self.assertTrue(any(task.get("status") == "paused" for task in tasks), tasks)
+                self.assertEqual(server.requests, [], "resume-disabled startup should not begin an HTTP transfer")
+            finally:
+                worker.requestInterruption()
+                worker.wait(6500)
+                server.shutdown()
+                server.server_close()
+                server_thread.join(timeout=2)
 
     def test_queue_pause_resume_removal_failure_and_sha256(self):
         with tempfile.TemporaryDirectory(prefix="fetchdeck-engine-") as directory:

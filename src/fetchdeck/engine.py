@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
@@ -22,6 +23,7 @@ from PySide6.QtCore import QThread, Signal
 
 from .filesystem import move_to_recycle_bin
 from .paths import AppPaths
+from .preferences import Preferences
 from .trackers import TrackerError, TrackerListStore
 
 
@@ -179,6 +181,10 @@ class Aria2Daemon:
         startup_timeout: float = 8.0,
         max_concurrent_downloads: int = 5,
         connections_per_task: int = 4,
+        download_limit_kib: int = 0,
+        upload_limit_kib: int = 0,
+        user_agent: str = "FetchDeck/0.1",
+        resume_on_launch: bool = True,
     ) -> Aria2Daemon:
         if not 1 <= max_concurrent_downloads <= 64:
             raise EngineError("Concurrent download limit must be between 1 and 64.")
@@ -188,6 +194,7 @@ class Aria2Daemon:
         lock = InstanceLock(paths.aria2_lock)
         lock.acquire()
         process: subprocess.Popen[bytes] | None = None
+        launch_session: Path | None = None
         try:
             paths.aria2_session.touch(exist_ok=True)
             binary = cls._find_binary()
@@ -220,8 +227,20 @@ class Aria2Daemon:
                 f"--max-concurrent-downloads={max_concurrent_downloads}",
                 f"--split={connections_per_task}",
                 f"--max-connection-per-server={connections_per_task}",
+                f"--max-overall-download-limit={download_limit_kib}K",
+                f"--max-overall-upload-limit={upload_limit_kib}K",
+                f"--user-agent={user_agent}",
                 "--quiet=true",
             ]
+            input_file = paths.aria2_session
+            if not resume_on_launch and paths.aria2_session.stat().st_size:
+                launch_session = paths.root / "launch-session.txt"
+                launch_session.write_text(
+                    mark_session_entries_paused(paths.aria2_session.read_text(encoding="utf-8")),
+                    encoding="utf-8",
+                )
+                input_file = launch_session
+            args[args.index(f"--input-file={paths.aria2_session}")] = f"--input-file={input_file}"
             creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             process = subprocess.Popen(
                 args,
@@ -240,15 +259,21 @@ class Aria2Daemon:
                 try:
                     version = rpc.call("getVersion")
                     rpc.timeout = 2.0
+                    if launch_session:
+                        launch_session.unlink(missing_ok=True)
                     return cls(process, rpc, lock, version.get("version", "unknown"))
                 except EngineError as exc:
                     last_rpc = exc
                     time.sleep(0.1)
+            if launch_session:
+                launch_session.unlink(missing_ok=True)
             raise EngineError(
                 f"aria2 did not become ready on loopback port {port} within {startup_timeout:g}s. "
                 "The port may be occupied or aria2 may have failed to start."
             ) from last_rpc
         except Exception:
+            if launch_session:
+                launch_session.unlink(missing_ok=True)
             try:
                 if process is not None and process.poll() is None:
                     try:
@@ -295,13 +320,17 @@ class EngineWorker(QThread):
     def __init__(
         self,
         paths: AppPaths,
-        max_concurrent_downloads: int = 5,
-        connections_per_task: int = 4,
+        preferences: Preferences | None = None,
+        max_concurrent_downloads: int | None = None,
+        connections_per_task: int | None = None,
     ) -> None:
         super().__init__()
         self.paths = paths
-        self.max_concurrent_downloads = max_concurrent_downloads
-        self.connections_per_task = connections_per_task
+        self.preferences = preferences or Preferences.defaults(paths.default_download_dir)
+        if max_concurrent_downloads is not None:
+            self.preferences = replace(self.preferences, max_concurrent_downloads=max_concurrent_downloads)
+        if connections_per_task is not None:
+            self.preferences = replace(self.preferences, connections_per_task=connections_per_task)
         self._actions: Queue[tuple[str, str, tuple[Any, ...]]] = Queue()
         self._ftp_resume_attempts: set[str] = set()
         self._task_destinations: dict[str, tuple[Path, str]] = {}
@@ -324,8 +353,12 @@ class EngineWorker(QThread):
         try:
             self._daemon = Aria2Daemon.start(
                 self.paths,
-                max_concurrent_downloads=self.max_concurrent_downloads,
-                connections_per_task=self.connections_per_task,
+                max_concurrent_downloads=self.preferences.max_concurrent_downloads,
+                connections_per_task=self.preferences.connections_per_task,
+                download_limit_kib=self.preferences.download_limit_kib,
+                upload_limit_kib=self.preferences.upload_limit_kib,
+                user_agent=self.preferences.user_agent,
+                resume_on_launch=self.preferences.resume_on_launch,
             )
         except EngineError as exc:
             self.error.emit(str(exc))
@@ -434,6 +467,15 @@ class EngineWorker(QThread):
             if not isinstance(trackers, list) or not trackers:
                 raise EngineError("Sync a usable tracker list before applying it.")
             rpc.call("changeGlobalOption", [{"bt-tracker": ",".join(trackers)}])
+        elif name == "update_runtime_settings":
+            preferences = args[0]
+            if not isinstance(preferences, Preferences):
+                raise EngineError("Invalid FetchDeck settings.")
+            rpc.call("changeGlobalOption", [{
+                "max-overall-download-limit": f"{preferences.download_limit_kib}K",
+                "max-overall-upload-limit": f"{preferences.upload_limit_kib}K",
+                "user-agent": preferences.user_agent,
+            }])
         elif name == "restart":
             gid, overwrite = args
             task = rpc.call("tellStatus", [gid, ["files"]])
@@ -612,3 +654,16 @@ def parse_session_entries(session_text: str) -> dict[str, tuple[str, Path, str]]
             uri = line.split("\t", 1)[0]
     save_entry()
     return entries
+
+
+def mark_session_entries_paused(session_text: str) -> str:
+    """Pause restored jobs in a temporary aria2 input file without changing saved session state."""
+    output = []
+    for entry in session_text.split("\n\n"):
+        lines = entry.splitlines()
+        if lines and not lines[0].startswith("#") and not any(
+            line.strip().startswith("pause=") for line in lines[1:]
+        ):
+            lines.append(" pause=true")
+        output.append("\n".join(lines))
+    return "\n\n".join(output)

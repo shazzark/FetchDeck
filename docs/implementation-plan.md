@@ -54,11 +54,11 @@ Inspected the public `missuo/motrix-gpui` source at commit `a26c3a9116375b45d941
 ## Phase 4 — Settings, notifications, and desktop polish
 
 - **Goal:** Make common behavior configurable, persistent, and understandable.
-- **Scope:** Default folder, concurrency, connections, upload/download limits, User-Agent, theme, notification choices, resume-on-launch, quit warning; completion/failure feed and Windows notifications; keyboard shortcuts; empty/loading/error states; restart-required notes.
+- **Scope:** Persist default folder, concurrency, connections, upload/download limits, User-Agent, theme, notification choices, resume-on-launch, and quit warning; completion/failure feed and Windows tray notifications; keyboard shortcuts; clear engine/settings states; restart-required notes.
 - **Exclusions:** Dashboard redesign, packaging, plugins, browser and CLI integrations.
 - **Dependencies:** Phase 3 complete; Windows notification support available on target OS.
-- **Acceptance criteria:** Settings persist and change engine/UI behavior as specified; polling does not duplicate events; quit flow explains active work; completion and failure states are visible.
-- **Verification:** Reopen and inspect settings and engine effects; verify real completion/failure notifications, including Windows system notification; exercise quit with active work.
+- **Acceptance criteria:** Settings persist across app reopen and change engine/UI behavior as specified; polling does not duplicate events; quit flow explains active work; in-app and Windows notifications appear for completion and failure.
+- **Verification:** Reopen and inspect settings and engine effects; verify real completion/failure notifications in the visible Windows desktop; exercise quit with a real active download. Automated UI checks do not replace visible Windows notification verification.
 
 ## Phase 5 — Local Next.js and TypeScript dashboard
 

@@ -24,6 +24,10 @@ class AppPaths:
         return self.root / "activity.json"
 
     @property
+    def notifications(self) -> Path:
+        return self.root / "notifications.json"
+
+    @property
     def aria2_session(self) -> Path:
         return self.root / "aria2.session"
 
