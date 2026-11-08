@@ -5,7 +5,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 ## Phase 0 - Foundation and reference behavior - COMPLETE
 
 - [x] Inspect git, branch, workspace, and repository instructions.
-- [x] Audit Motrix GPUI README claims against source code and identify explicit placeholders and Windows-specific code paths.
+- [x] Audit a publicly available download-manager README against its source code and identify explicit placeholders and Windows-specific code paths.
 - [x] Record runtime detection: Python 3.13.3 at `C:\Users\chido\.pyenv\pyenv-win\versions\3.13.3\python.exe`; `py -0p` finds no registered Pythons; aria2c was initially not found; it was installed in Phase 1. Node exists but is deferred.
 - [x] Add six-phase roadmap and Windows venv/setup/check commands.
 - [x] Create `.venv` with Python 3.13.3 and install FetchDeck 0.1.0 with PySide6 6.9.2.
@@ -13,7 +13,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 - [x] Run `.\.venv\Scripts\python.exe -m compileall src` successfully.
 - [x] Record aria2c missing setup and exact next prerequisite for Phase 1.
 
-**Observed verification:** Before changes, `git status --porcelain=v1` was empty; branch was `main`, no commits existed, and `origin` was `https://github.com/shazzark/FetchDeck.git`. Direct interpreter reports Python 3.13.3. The `py` launcher reports no registered installations; the venv used the full interpreter path. `.venv\Scripts\python.exe -m pip install -e .` succeeded with PySide6 6.9.2. `QT_QPA_PLATFORM=offscreen .venv\Scripts\python.exe -m fetchdeck` entered the event loop and was stopped with Ctrl+C. `.venv\Scripts\python.exe -m compileall src` passed. `where.exe aria2c` found no executable. Node is installed but no Node setup was performed. Motrix GPUI source audited at `a26c3a9116375b45d941af9b0b2da91ebfcfc985`; implementation paths, placeholders, and Windows-specific code are summarized in `docs/implementation-plan.md`. The upstream code audit is not a real-engine or Windows verification run.
+**Observed verification:** Before changes, `git status --porcelain=v1` was empty; branch was `main`, no commits existed, and `origin` was `https://github.com/shazzark/FetchDeck.git`. Direct interpreter reports Python 3.13.3. The `py` launcher reports no registered installations; the venv used the full interpreter path. `.venv\Scripts\python.exe -m pip install -e .` succeeded with PySide6 6.9.2. `QT_QPA_PLATFORM=offscreen .venv\Scripts\python.exe -m fetchdeck` entered the event loop and was stopped with Ctrl+C. `.venv\Scripts\python.exe -m compileall src` passed. `where.exe aria2c` found no executable. Node is installed but no Node setup was performed. The Phase 0 source audit is summarized in `docs/implementation-plan.md`; it is not a real-engine or Windows verification run.
 
 **Local commit:** `7c1d7e1040dcb974a60a00af79a5c93155e32c14` (`feat(foundation): establish Phase 0 app scaffold`).
 

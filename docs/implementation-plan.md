@@ -1,10 +1,10 @@
 # Implementation plan
 
-This roadmap follows the requested six-phase sequence. Scope and gates describe FetchDeck work; Motrix GPUI is a behavior reference, not source code to copy. FetchDeck uses original branding, a PySide6 Windows-first interface, and a static Next.js dashboard served locally. Browser extensions, plugins, and CLI integration are deferred.
+This roadmap follows FetchDeck's six-phase delivery plan. FetchDeck is original code, UI, and branding, built around a Python/PySide6 desktop app, aria2 transfers, and an optional static Next.js dashboard. Browser extensions, plugins, and CLI integration are deferred.
 
-### Reference behavior map (source audit)
+### Historical source audit
 
-Inspected the public `missuo/motrix-gpui` source at commit `a26c3a9116375b45d941af9b0b2da91ebfcfc985` (temporary read-only clone). README claims and corresponding implementation evidence:
+During Phase 0, the public `missuo/motrix-gpui` source at commit `a26c3a9116375b45d941af9b0b2da91ebfcfc985` was inspected in a temporary read-only clone to inform the verification checklist. The notes below record that source audit; FetchDeck's own implementation and acceptance criteria are defined by the phase sections that follow.
 
 - **Downloads / Phase 1–2:** `src/ui/add_task.rs` builds the URL and torrent forms; `src/aria2/client.rs` implements add, pause, resume, remove, and list RPC calls; `src/ui/downloads.rs` implements filters, search, bulk actions, confirmation, and trash handling. `src/state.rs` performs RPC and 1-second polling on background executors.
 - **Engine / Phase 1:** `src/aria2/daemon.rs` finds or spawns aria2c, requests loopback-only RPC, and configures a session file. The client uses a 15-second HTTP timeout. Windows builds hide the child console and search `PATH`, `C:\Program Files\aria2\aria2c.exe`, and Chocolatey. Its implementation does not hold a cross-instance session lock and does not synchronously confirm engine readiness before the UI polls; FetchDeck will handle both per its requirements. The reference sets `--rpc-allow-origin-all=true` while binding RPC to loopback; FetchDeck will keep its local statistics origin policy restrictive.
@@ -18,7 +18,7 @@ Inspected the public `missuo/motrix-gpui` source at commit `a26c3a9116375b45d941
 ## Phase 0 — Foundation and reference behavior
 
 - **Goal:** Establish a reproducible local Python/PySide6 app foundation and record verified reference behavior and machine prerequisites.
-- **Scope:** Inspect the repository and Motrix GPUI reference; separate README claims from implementation evidence; create this plan and task ledger; establish package metadata, a runnable desktop window, Windows setup instructions, and a test/check entrypoint. Record Python, PySide6, and aria2c detection.
+- **Scope:** Inspect the repository and publicly documented download-manager behavior; separate README claims from implementation evidence; create this plan and task ledger; establish package metadata, a runnable desktop window, Windows setup instructions, and a test/check entrypoint. Record Python, PySide6, and aria2c detection.
 - **Exclusions:** Download management, dashboard, Node setup, bundling third-party binaries, plugins, browser extensions, and CLI integration.
 - **Dependencies:** Windows development machine; Python 3.11–3.13 candidate versions; PySide6 install; aria2c detection (installation is needed before Phase 1).
 - **Acceptance criteria:** Documented install commands reproduce the environment; documented entrypoint launches the window; supported Python version is recorded from verification; aria2c version or missing setup is recorded; upstream feature claims and intentional differences are distinguished.
