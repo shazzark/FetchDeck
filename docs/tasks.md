@@ -50,7 +50,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Local commit:** `7ecf19d3a904e5e95fe22d31a717c997bb49f2e3` (`feat(torrents): implement Phase 3 torrent and tracker workflows`).
 
-## Phase 4 - Settings, notifications, and desktop polish - IN PROGRESS
+## Phase 4 - Settings, notifications, and desktop polish - COMPLETE
 
 - [x] Persist the requested settings, reopen the UI from the saved file, and verify engine/UI effects.
 - [x] Add a deduplicated completion/failure feed and Windows tray notification delivery path.
@@ -58,13 +58,15 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 - [x] Verify aria2 option changes and resume-on-launch behavior with the real engine; exercise the quit prompt response in a UI test.
 - [x] User confirmed the W3C `dummy.pdf` HTTPS transfer completed and Windows displayed the "Download complete" banner.
 - [x] User reported the test file paused at 44% (3.5 MB), reopened active at 51% (4.1 MB), and completed with a Windows notification; verify the resume offset from the server log.
-- [ ] Confirm the active-download quit warning was shown and a real failed task displayed a Windows failure notification.
+- [x] User confirmed the active-download quit warning appeared and both Windows completion and failure notifications worked.
 
-**Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. `$env:LOCALAPPDATA='C:\Users\chido\AppData\Local'; .venv\Scripts\python.exe -m unittest discover -s tests -v` ran 29 tests in 102.439 seconds; all passed without skips, including real aria2 1.37.0 checks for startup concurrency/connections, runtime upload/download limits and User-Agent, and `resume_on_launch=false` restoring a saved task paused without sending an HTTP request. UI tests verified preferences remain populated after reopening the window, task transition notifications are persisted and deduplicated, and a simulated No response keeps the active-work quit dialog open. `.venv\Scripts\python.exe -m pip check` reported no broken requirements. User-reported visible Windows check (2026-11-08): W3C `dummy.pdf` completed over HTTPS and the Windows "Download complete" banner appeared. Two Tele2 `10MB.zip` attempts failed with a connection error at 0 B; no Windows failure-banner observation was included in the report. The user then reported the local 8 MiB test file paused at 44% (3.5 MB), reopened active at 51% (4.1 MB), and completed with a Windows completion notification. The server log confirms nonzero resume offsets: `Range=bytes=2736128-8388607` and `Range=bytes=3719168-8388607`; the latter is about 44.3% of 8 MiB and matches the reported pause point. The live manual recovery server reuses `ControlledHandler` from `tests/test_aria2_integration.py`; it serves 8 MiB at 64 KiB chunks with a 0.25-second delay and byte-range support. Range preflight received HTTP 206. Server PID 17196 listens on 127.0.0.1:8765; request log: `%TEMP%\fetchdeck-phase2-http-requests.log`.
+**Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. `$env:LOCALAPPDATA='C:\Users\chido\AppData\Local'; .venv\Scripts\python.exe -m unittest discover -s tests -v` ran 29 tests in 102.439 seconds; all passed without skips, including real aria2 1.37.0 checks for startup concurrency/connections, runtime upload/download limits and User-Agent, and `resume_on_launch=false` restoring a saved task paused without sending an HTTP request. UI tests verified preferences remain populated after reopening the window, task transition notifications are persisted and deduplicated, and a simulated No response keeps the active-work quit dialog open. `.venv\Scripts\python.exe -m pip check` reported no broken requirements. User-reported visible Windows check (2026-11-08): W3C `dummy.pdf` completed over HTTPS and the Windows "Download complete" banner appeared. Two Tele2 `10MB.zip` attempts failed with a connection error at 0 B; the user confirmed that the Windows failure notification worked. The user then reported the local 8 MiB test file paused at 44% (3.5 MB), reopened active at 51% (4.1 MB), and completed with a Windows completion notification. The server log confirms nonzero resume offsets: `Range=bytes=2736128-8388607` and `Range=bytes=3719168-8388607`; the latter is about 44.3% of 8 MiB and matches the reported pause point. The live manual recovery server reuses `ControlledHandler` from `tests/test_aria2_integration.py`; it serves 8 MiB at 64 KiB chunks with a 0.25-second delay and byte-range support. Range preflight received HTTP 206. Server PID 17196 listens on 127.0.0.1:8765; request log: `%TEMP%\fetchdeck-phase2-http-requests.log`.
 
-**Remaining Phase 4 gate:** Resume is now confirmed by both the user report and nonzero Range log. The report does not state whether the active-download quit warning appeared or whether either Tele2 failure produced a Windows failure banner. Reproduce the warning with `http://127.0.0.1:8765/phase2-resume-test.bin`: wait for nonzero transferred bytes, close the main window, confirm the ?Downloads are still active? dialog appears, and choose Yes. To check failure notifications while the same server runs, add `http://127.0.0.1:8765/missing.bin` and confirm a ?Download failed? Windows notification. Keep Phase 4 IN PROGRESS until the visible Windows UI checks are reported.
+**Phase 4 acceptance verified:** User confirmed the active-download quit warning appeared while the test download was active and both the Windows completion and failure notifications appeared. The local server log confirmed a nonzero resume offset matching the reported 44% pause. The two Tele2 failures are recorded as connection errors at 0 B, not successful download tests.
 
-**Local checkpoint commit:** `299e59788fb72b2ec06c597547911331aa4886c5` (`feat(settings): add Phase 4 preferences and notifications`).
+**Phase 4 implementation checkpoint:** `299e59788fb72b2ec06c597547911331aa4886c5` (`feat(settings): add Phase 4 preferences and notifications`).
+
+**Phase 4 completion commit:** Pending.
 
 ## Phase 5 - Local Next.js and TypeScript dashboard - NOT STARTED
 
@@ -74,11 +76,11 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Verification:** Not started. Node setup deferred. Not a Phase 6 dependency.
 
-## Phase 6 - Windows packaging and release readiness - NOT STARTED
+## Phase 6 - Windows packaging and release readiness - IN PROGRESS
 
 - [ ] Build a reproducible one-folder Windows package and portable archive; defer dashboard assets with Phase 5.
 - [ ] Include applicable third-party notices and document aria2 as an external runtime dependency.
 - [ ] Verify launch without host Python, real aria2 workflows, app-data upgrade preservation, and child-process cleanup.
 - [ ] Update supported-feature, troubleshooting, and usage documentation; create local release artifacts.
 
-**Preparation:** PyInstaller 6.22.3 is installed in `.venv`; no package has been built. Packaging research found aria2 is GPL-2.0, PySide6/Qt use LGPL/GPL and include third-party notices, and PyInstaller has a bootloader exception. The planned package keeps aria2 external and must preserve applicable Qt notices and replaceable shared libraries. **Dependencies:** Phase 4 completion and clean Windows verification; Phase 5 is deferred and not a dependency.
+**Preparation:** Phase 4 is complete. PyInstaller 6.22.3 is installed in `.venv`; Phase 6 build is underway. Packaging research found aria2 is GPL-2.0, PySide6/Qt use LGPL/GPL and include third-party notices, and PyInstaller has a bootloader exception. The package keeps aria2 external and must preserve applicable Qt notices and replaceable shared libraries. Phase 5 is deferred and is not a dependency. A separate clean Windows machine is not available in this workspace.

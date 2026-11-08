@@ -1,6 +1,6 @@
 # FetchDeck
 
-FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 3 are complete. Phase 4 settings and notification workflows are implemented; completion notification is confirmed; failure-notification and active-download quit verification remain. See [the implementation plan](docs/implementation-plan.md).
+FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 4 are complete, including user-confirmed Windows completion/failure notifications and the active-download quit warning. See [the implementation plan](docs/implementation-plan.md).
 
 ## Development setup (Windows PowerShell)
 
