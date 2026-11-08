@@ -1,6 +1,6 @@
 # FetchDeck
 
-FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 and 1 are complete. See [the implementation plan](docs/implementation-plan.md).
+FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0, 1, and 2 are complete. See [the implementation plan](docs/implementation-plan.md).
 
 ## Development setup (Windows PowerShell)
 
@@ -24,4 +24,4 @@ If PowerShell blocks activation, use `Set-ExecutionPolicy -Scope Process -Execut
 
 Run `python -m compileall src tests` for a Python syntax check and `python -m unittest discover -s tests -v` for the current test suite. The controlled-server aria2 integration test is skipped when aria2c is missing; a skip does not pass the Phase 1 real-engine gate. `python -m fetchdeck` opens the PySide6 window.
 
-The dashboard is optional during core development. Node setup is deferred until Phase 5.
+The Downloads screen supports HTTP, HTTPS, and FTP links, pause/resume, queue controls, session recovery, status filtering, search, multi-select, restart collision choices, and confirmed Recycle Bin moves. Deliberately paused tasks stay paused after restart. Phase 3 adds torrent and tracker workflows. The dashboard is optional during core development; Node setup remains deferred until Phase 5.

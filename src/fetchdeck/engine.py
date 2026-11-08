@@ -15,9 +15,11 @@ import uuid
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from PySide6.QtCore import QThread, Signal
 
+from .filesystem import move_to_recycle_bin
 from .paths import AppPaths
 
 
@@ -201,8 +203,10 @@ class Aria2Daemon:
                 "--dir=" + str(paths.default_download_dir),
                 f"--input-file={paths.aria2_session}",
                 f"--save-session={paths.aria2_session}",
-                "--save-session-interval=15",
+                "--save-session-interval=1",
+                "--auto-save-interval=3",
                 "--continue=true",
+                "--always-resume=true",
                 "--allow-overwrite=false",
                 "--auto-file-renaming=true",
                 f"--max-concurrent-downloads={max_concurrent_downloads}",
@@ -290,6 +294,9 @@ class EngineWorker(QThread):
         self.max_concurrent_downloads = max_concurrent_downloads
         self.connections_per_task = connections_per_task
         self._actions: Queue[tuple[str, str, tuple[Any, ...]]] = Queue()
+        self._ftp_resume_attempts: set[str] = set()
+        self._task_destinations: dict[str, tuple[Path, str]] = {}
+        self._task_sources: dict[str, str] = {}
         self._daemon: Aria2Daemon | None = None
 
     def submit(self, name: str, *args: Any) -> str:
@@ -298,6 +305,13 @@ class EngineWorker(QThread):
         return action_id
 
     def run(self) -> None:
+        try:
+            session = self.paths.aria2_session.read_text(encoding="utf-8")
+        except OSError:
+            session = ""
+        for gid, (uri, folder, out) in parse_session_entries(session).items():
+            self._task_sources[gid] = uri
+            self._task_destinations[gid] = (folder, out)
         try:
             self._daemon = Aria2Daemon.start(
                 self.paths,
@@ -319,10 +333,12 @@ class EngineWorker(QThread):
                 try:
                     action_id, name, args = self._actions.get(timeout=0.1)
                     try:
-                        self._run_action(name, args)
-                        self.action_finished.emit(action_id, True, "")
+                        result = self._run_action(name, args)
+                        self.action_finished.emit(action_id, True, result or "")
                     except EngineError as exc:
                         self.action_finished.emit(action_id, False, str(exc))
+                    except OSError:
+                        self.action_finished.emit(action_id, False, "Windows could not complete the requested file operation.")
                 except Empty:
                     pass
 
@@ -344,18 +360,25 @@ class EngineWorker(QThread):
             self._daemon.stop()
             self._daemon = None
 
-    def _run_action(self, name: str, args: tuple[Any, ...]) -> None:
+    def _run_action(self, name: str, args: tuple[Any, ...]) -> str | None:
         assert self._daemon is not None
         rpc = self._daemon.rpc
         if name == "add":
             url, folder = args
-            rpc.call("addUri", [[url], {"dir": str(folder)}])
+            gid = str(rpc.call("addUri", [[url], {"dir": str(folder)}]))
+            self._task_destinations[gid] = (Path(folder), output_name_for_uri(url))
+            self._task_sources[gid] = url
         elif name == "pause":
             try:
                 rpc.call("pause", [args[0]])
             except EngineError:
                 rpc.call("forcePause", [args[0]])
         elif name == "resume":
+            task = rpc.call("tellStatus", [args[0], ["files"]])
+            files = task.get("files") or []
+            uris = files[0].get("uris") or [] if files else []
+            if any(entry.get("uri", "").lower().startswith("ftp:") for entry in uris):
+                self._ftp_resume_attempts.add(args[0])
             rpc.call("unpause", [args[0]])
         elif name == "remove":
             gid, status = args
@@ -365,6 +388,69 @@ class EngineWorker(QThread):
                 except EngineError:
                     rpc.call("forceRemove", [gid])
             rpc.call("removeDownloadResult", [gid])
+            self._task_destinations.pop(gid, None)
+            self._task_sources.pop(gid, None)
+        elif name == "pause_all":
+            rpc.call("pauseAll")
+        elif name == "resume_all":
+            rpc.call("unpauseAll")
+        elif name == "restart":
+            gid, overwrite = args
+            task = rpc.call("tellStatus", [gid, ["files"]])
+            files = task.get("files") or []
+            if not files:
+                raise EngineError("aria2 did not provide a file path for this task.")
+            file_info = files[0]
+            uris = file_info.get("uris") or []
+            uri = next((entry.get("uri") for entry in uris if entry.get("uri")), None)
+            uri = uri or self._task_sources.get(gid)
+            if not uri:
+                raise EngineError("This task does not have a restartable source URL.")
+            parsed = urlsplit(uri)
+            if parsed.scheme.lower() not in {"http", "https", "ftp"} or not parsed.hostname:
+                raise EngineError("This task type cannot be restarted from the Downloads screen.")
+            saved_path = Path(file_info.get("path") or "")
+            saved_folder, saved_out = self._task_destinations.get(gid, (self.paths.default_download_dir, ""))
+            out = saved_path.name or saved_out or unquote(Path(parsed.path).name)
+            if not out:
+                raise EngineError("aria2 could not determine the output filename for this task.")
+            folder = saved_path.parent if saved_path.name else saved_folder
+            if not overwrite:
+                out = available_output_name(folder, out)
+            rpc.call("removeDownloadResult", [gid])
+            new_gid = rpc.call(
+                "addUri",
+                [[uri], {
+                    "dir": str(folder),
+                    "out": out,
+                    "allow-overwrite": "true" if overwrite else "false",
+                    "auto-file-renaming": "true",
+                    "remove-control-file": "true" if overwrite else "false",
+                    "always-resume": "true",
+                }],
+            )
+            self._task_destinations[str(new_gid)] = (folder, out)
+            self._task_sources[str(new_gid)] = uri
+            self._task_destinations.pop(gid, None)
+            self._task_sources.pop(gid, None)
+            return str(new_gid)
+        elif name == "recycle":
+            gid, status = args
+            task = rpc.call("tellStatus", [gid, ["files"]])
+            files = task.get("files") or []
+            path = Path(files[0].get("path", "")) if files else None
+            if status in {"active", "waiting", "paused"}:
+                try:
+                    rpc.call("remove", [gid])
+                except EngineError:
+                    rpc.call("forceRemove", [gid])
+            rpc.call("removeDownloadResult", [gid])
+            self._task_destinations.pop(gid, None)
+            self._task_sources.pop(gid, None)
+            if path is None or not path.is_file():
+                raise EngineError("The task was removed, but its downloaded file was not found.")
+            related = [path, Path(f"{path}.aria2")]
+            move_to_recycle_bin([candidate for candidate in related if candidate.exists()])
         else:
             raise EngineError("Unknown download action.")
 
@@ -385,4 +471,77 @@ class EngineWorker(QThread):
         tasks.extend(rpc.call("tellActive", [keys]))
         tasks.extend(rpc.call("tellWaiting", [0, 1000, keys]))
         tasks.extend(rpc.call("tellStopped", [0, 1000, keys]))
+        for task in tasks:
+            files = task.get("files") or []
+            path = files[0].get("path", "") if files else ""
+            if path:
+                target = Path(path)
+                self._task_destinations[task.get("gid", "")] = (target.parent, target.name)
+                task["_fetchdeckPath"] = str(target)
+                task["_fetchdeckName"] = target.name
+            else:
+                gid = task.get("gid", "")
+                folder, output = self._task_destinations.get(gid, (Path(), ""))
+                if not output and gid in self._task_sources:
+                    output = output_name_for_uri(self._task_sources[gid])
+                if output:
+                    task["_fetchdeckPath"] = str(folder / output)
+                    task["_fetchdeckName"] = output
+            uris = files[0].get("uris") or [] if files else []
+            source = next((entry.get("uri") for entry in uris if entry.get("uri")), None)
+            if source:
+                self._task_sources[task.get("gid", "")] = source
+            if task.get("gid") in self._ftp_resume_attempts and task.get("status") == "error":
+                task["errorMessage"] = (
+                    "The FTP server could not resume this partial download. "
+                    "It may not support the REST command required for resume."
+                )
+            if task.get("status") in {"complete", "removed"}:
+                self._ftp_resume_attempts.discard(task.get("gid", ""))
         return tasks
+
+
+def available_output_name(folder: Path, filename: str) -> str:
+    """Choose a destination not already present when restart keeps both files."""
+    candidate = Path(filename)
+    if not (folder / candidate.name).exists():
+        return candidate.name
+    for index in range(1, 10_000):
+        name = f"{candidate.stem}.{index}{candidate.suffix}"
+        if not (folder / name).exists():
+            return name
+    raise EngineError("No unused filename is available for the restarted download.")
+
+
+def output_name_for_uri(uri: str) -> str:
+    parsed = urlsplit(uri)
+    return unquote(Path(parsed.path).name) or parsed.hostname or "Download"
+
+
+def parse_session_entries(session_text: str) -> dict[str, tuple[str, Path, str]]:
+    """Read source and destination metadata from aria2's own session format."""
+    entries: dict[str, tuple[str, Path, str]] = {}
+    options: dict[str, str] = {}
+    uri = ""
+
+    def save_entry() -> None:
+        gid = options.get("gid")
+        folder = options.get("dir")
+        if gid and folder:
+            entries[gid] = (uri, Path(folder), options.get("out") or output_name_for_uri(uri))
+
+    for line in session_text.splitlines():
+        if not line:
+            save_entry()
+            options = {}
+            uri = ""
+        elif line[0].isspace():
+            key, separator, value = line.strip().partition("=")
+            if separator and key in {"gid", "dir", "out"}:
+                options[key] = value
+        elif not line.startswith("#"):
+            save_entry()
+            options = {}
+            uri = line.split("\t", 1)[0]
+    save_entry()
+    return entries

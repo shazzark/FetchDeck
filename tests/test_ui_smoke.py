@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QItemSelectionModel, QTimer
 from PySide6.QtWidgets import QApplication
 
 from fetchdeck.app import FetchDeckWindow
@@ -40,6 +40,38 @@ class EngineUnavailableUiTests(unittest.TestCase):
                 timer.stop()
                 self.assertIn("aria2c was not found", window.engine_status.text())
                 self.assertFalse(window.add_button.isEnabled())
+                window.close()
+                self.app.processEvents()
+            finally:
+                if previous_app_data is None:
+                    os.environ.pop("LOCALAPPDATA", None)
+                else:
+                    os.environ["LOCALAPPDATA"] = previous_app_data
+
+    def test_multiselection_survives_a_polling_snapshot_and_filters_apply(self):
+        previous_app_data = os.environ.get("LOCALAPPDATA")
+        with tempfile.TemporaryDirectory(prefix="fetchdeck-ui-selection-") as app_data:
+            os.environ["LOCALAPPDATA"] = app_data
+            try:
+                with patch("fetchdeck.engine.Aria2Daemon.start", side_effect=EngineError("test engine unavailable")):
+                    window = FetchDeckWindow()
+                window.worker.wait(1000)
+                tasks = [
+                    {"gid": "a", "status": "waiting", "files": [{"path": "C:/downloads/alpha.zip"}]},
+                    {"gid": "b", "status": "paused", "files": [{"path": "C:/downloads/beta.zip"}]},
+                ]
+                window._show_snapshot(tasks)
+                selection = window.table.selectionModel()
+                for row in (0, 1):
+                    selection.select(
+                        window.table.model().index(row, 0),
+                        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+                window._show_snapshot(tasks)
+                self.assertEqual({gid for gid, _status, _path in window._selected_tasks()}, {"a", "b"})
+                window.status_filter.setCurrentText("Paused")
+                self.assertTrue(window.table.isRowHidden(0))
+                self.assertFalse(window.table.isRowHidden(1))
                 window.close()
                 self.app.processEvents()
             finally:

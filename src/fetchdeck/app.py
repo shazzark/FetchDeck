@@ -3,11 +3,12 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -29,7 +31,7 @@ from .paths import AppPaths
 
 
 def validate_download_url(value: str) -> str:
-    """Accept only direct HTTP(S) links without embedded credentials."""
+    """Accept direct HTTP, HTTPS, or anonymous FTP links without URL credentials."""
     url = value.strip()
     try:
         parsed = urlsplit(url)
@@ -37,14 +39,16 @@ def validate_download_url(value: str) -> str:
         _ = parsed.port
     except ValueError as exc:
         raise ValueError("Enter a valid HTTP or HTTPS URL.") from exc
-    if parsed.scheme.lower() not in {"http", "https"} or not host:
-        raise ValueError("Only direct HTTP and HTTPS links are supported in this phase.")
+    if parsed.scheme.lower() not in {"http", "https", "ftp"} or not host:
+        raise ValueError("Only direct HTTP, HTTPS, and FTP links are supported.")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("Links with a username or password in the URL are not supported.")
     return url
 
 
 def task_name(task: dict[str, Any]) -> str:
+    if task.get("_fetchdeckName"):
+        return task["_fetchdeckName"]
     files = task.get("files") or []
     if files and files[0].get("path"):
         return Path(files[0]["path"]).name or files[0]["path"]
@@ -69,7 +73,7 @@ class AddDownloadDialog(QDialog):
         self.setWindowTitle("Add download")
         self.setMinimumWidth(520)
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://example.com/file.zip")
+        self.url_input.setPlaceholderText("https://example.com/file.zip or ftp://example.com/file.zip")
         self.folder_input = QLineEdit(str(default_folder))
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
@@ -167,18 +171,53 @@ class FetchDeckWindow(QMainWindow):
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
         self.remove_button = QPushButton("Remove")
+        self.restart_button = QPushButton("Restart")
+        self.recycle_button = QPushButton("Move to Recycle Bin")
+        self.pause_all_button = QPushButton("Pause all")
+        self.resume_all_button = QPushButton("Resume all")
         self.add_button.setEnabled(False)
-        self.pause_button.setEnabled(False)
-        self.resume_button.setEnabled(False)
-        self.remove_button.setEnabled(False)
+        for button in (
+            self.pause_button,
+            self.resume_button,
+            self.remove_button,
+            self.restart_button,
+            self.recycle_button,
+            self.pause_all_button,
+            self.resume_all_button,
+        ):
+            button.setEnabled(False)
         self.add_button.clicked.connect(self._add_download)
         self.pause_button.clicked.connect(lambda: self._task_action("pause"))
         self.resume_button.clicked.connect(lambda: self._task_action("resume"))
         self.remove_button.clicked.connect(self._remove_download)
-        for button in (self.add_button, self.pause_button, self.resume_button, self.remove_button):
+        self.restart_button.clicked.connect(self._restart_download)
+        self.recycle_button.clicked.connect(self._recycle_download)
+        self.pause_all_button.clicked.connect(lambda: self.worker.submit("pause_all"))
+        self.resume_all_button.clicked.connect(lambda: self.worker.submit("resume_all"))
+        for button in (
+            self.add_button,
+            self.pause_button,
+            self.resume_button,
+            self.remove_button,
+            self.restart_button,
+            self.recycle_button,
+            self.pause_all_button,
+            self.resume_all_button,
+        ):
             toolbar.addWidget(button)
         toolbar.addStretch()
         layout.addLayout(toolbar)
+
+        filter_row = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search downloads")
+        self.status_filter = QComboBox()
+        self.status_filter.addItems(["All statuses", "Active", "Queued", "Paused", "Complete", "Failed"])
+        self.search_input.textChanged.connect(self._apply_filters)
+        self.status_filter.currentTextChanged.connect(self._apply_filters)
+        filter_row.addWidget(self.search_input, 1)
+        filter_row.addWidget(self.status_filter)
+        layout.addLayout(filter_row)
 
         self.engine_status = QLabel("Starting aria2…")
         self.engine_status.setWordWrap(True)
@@ -187,8 +226,10 @@ class FetchDeckWindow(QMainWindow):
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(["File", "Status", "Progress", "Transferred", "Total", "Speed", "Details"])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self._selection_changed)
         layout.addWidget(self.table, 1)
@@ -197,10 +238,14 @@ class FetchDeckWindow(QMainWindow):
     def _engine_ready(self, version: str) -> None:
         self.engine_status.setText(f"aria2 {version} is running.")
         self.add_button.setEnabled(True)
+        self.pause_all_button.setEnabled(True)
+        self.resume_all_button.setEnabled(True)
 
     def _engine_error(self, message: str) -> None:
         self.engine_status.setText(f"Engine unavailable: {message}")
         self.add_button.setEnabled(False)
+        self.pause_all_button.setEnabled(False)
+        self.resume_all_button.setEnabled(False)
 
     def _add_download(self) -> None:
         dialog = AddDownloadDialog(self.default_folder, self)
@@ -209,50 +254,124 @@ class FetchDeckWindow(QMainWindow):
         url, folder = dialog.values()
         self.worker.submit("add", url, folder)
 
-    def _selected_task(self) -> tuple[str, str] | None:
-        row = self.table.currentRow()
-        if row < 0:
-            return None
-        item = self.table.item(row, 0)
-        if item is None:
-            return None
-        return item.data(Qt.ItemDataRole.UserRole), item.data(Qt.ItemDataRole.UserRole + 1)
+    def _selected_tasks(self) -> list[tuple[str, str, str]]:
+        selected = []
+        for row in self.table.selectionModel().selectedRows():
+            item = self.table.item(row.row(), 0)
+            if item:
+                selected.append((
+                    item.data(Qt.ItemDataRole.UserRole),
+                    item.data(Qt.ItemDataRole.UserRole + 1),
+                    item.data(Qt.ItemDataRole.UserRole + 2) or "",
+                ))
+        return selected
 
     def _task_action(self, action: str) -> None:
-        selected = self._selected_task()
-        if not selected:
-            return
-        gid, _status = selected
-        self.worker.submit(action, gid)
+        for gid, _status, _path in self._selected_tasks():
+            self.worker.submit(action, gid)
 
     def _remove_download(self) -> None:
-        selected = self._selected_task()
+        selected = self._selected_tasks()
         if not selected:
             return
-        gid, status = selected
         confirmation = QMessageBox(self)
         confirmation.setWindowTitle("Remove download")
-        confirmation.setText("Remove this task from the list?")
+        confirmation.setText(f"Remove {len(selected)} selected task(s) from the list?")
         confirmation.setInformativeText("Any downloaded files will be kept.")
         cancel = confirmation.addButton(QMessageBox.StandardButton.Cancel)
         remove = confirmation.addButton("Remove", QMessageBox.ButtonRole.AcceptRole)
         confirmation.setDefaultButton(cancel)
         confirmation.exec()
         if confirmation.clickedButton() == remove:
-            self.worker.submit("remove", gid, status)
+            for gid, status, _path in selected:
+                self.worker.submit("remove", gid, status)
+
+    def _restart_download(self) -> None:
+        selected = self._selected_tasks()
+        if len(selected) != 1:
+            self.statusBar().showMessage("Select one stopped task to restart.", 5000)
+            return
+        gid, status, path_text = selected[0]
+        if status in {"active", "waiting", "paused"}:
+            self.statusBar().showMessage("Pause or stop this task before restarting it.", 5000)
+            return
+        path = Path(path_text) if path_text else None
+        overwrite = False
+        if path and path.exists():
+            prompt = QMessageBox(self)
+            prompt.setWindowTitle("Restart download")
+            prompt.setText(f"{path.name} already exists.")
+            prompt.setInformativeText("Replace the existing file, or keep it and save the restart with a new name?")
+            cancel = prompt.addButton(QMessageBox.StandardButton.Cancel)
+            keep = prompt.addButton("Keep both", QMessageBox.ButtonRole.ActionRole)
+            replace = prompt.addButton("Replace existing", QMessageBox.ButtonRole.DestructiveRole)
+            prompt.setDefaultButton(cancel)
+            prompt.exec()
+            if prompt.clickedButton() == cancel:
+                return
+            overwrite = prompt.clickedButton() == replace
+            if prompt.clickedButton() not in (keep, replace):
+                return
+        self.worker.submit("restart", gid, overwrite)
+
+    def _recycle_download(self) -> None:
+        selected = self._selected_tasks()
+        if not selected:
+            return
+        confirmation = QMessageBox(self)
+        confirmation.setWindowTitle("Move downloads to Recycle Bin")
+        confirmation.setText(f"Move files for {len(selected)} selected task(s) to the Recycle Bin?")
+        confirmation.setInformativeText("This removes the tasks and sends any downloaded files to the Windows Recycle Bin.")
+        cancel = confirmation.addButton(QMessageBox.StandardButton.Cancel)
+        move = confirmation.addButton("Move to Recycle Bin", QMessageBox.ButtonRole.DestructiveRole)
+        confirmation.setDefaultButton(cancel)
+        confirmation.exec()
+        if confirmation.clickedButton() == move:
+            for gid, status, _path in selected:
+                self.worker.submit("recycle", gid, status)
+
+    def _show_context_menu(self, position: Any) -> None:
+        index = self.table.indexAt(position)
+        if index.isValid() and not self.table.selectionModel().isRowSelected(index.row(), index.parent()):
+            self.table.selectRow(index.row())
+        menu = QMenu(self)
+        menu.addAction("Pause selected", lambda: self._task_action("pause"))
+        menu.addAction("Resume selected", lambda: self._task_action("resume"))
+        menu.addAction("Restart selected", self._restart_download)
+        menu.addSeparator()
+        menu.addAction("Remove selected (keep files)", self._remove_download)
+        menu.addAction("Move selected files to Recycle Bin", self._recycle_download)
+        menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def _apply_filters(self, *_args: Any) -> None:
+        query = self.search_input.text().strip().casefold()
+        filter_value = self.status_filter.currentText()
+        status_groups = {
+            "Active": {"active"},
+            "Queued": {"waiting"},
+            "Paused": {"paused"},
+            "Complete": {"complete"},
+            "Failed": {"error"},
+        }
+        wanted = status_groups.get(filter_value)
+        for row in range(self.table.rowCount()):
+            name = self.table.item(row, 0).text().casefold()
+            status = self.table.item(row, 1).text().casefold()
+            self.table.setRowHidden(row, bool((query and query not in name) or (wanted and status not in wanted)))
 
     def _selection_changed(self) -> None:
-        selected = self._selected_task()
-        enabled = selected is not None
+        selected = self._selected_tasks()
+        enabled = bool(selected)
         self.pause_button.setEnabled(enabled)
         self.resume_button.setEnabled(enabled)
         self.remove_button.setEnabled(enabled)
+        self.recycle_button.setEnabled(enabled)
+        self.restart_button.setEnabled(len(selected) == 1)
 
     def _show_snapshot(self, tasks: list[dict[str, Any]]) -> None:
-        current_gid = self._selected_task()
-        selected_gid = current_gid[0] if current_gid else None
+        selected_gids = {gid for gid, _status, _path in self._selected_tasks()}
         self.table.setRowCount(len(tasks))
-        selected_row = -1
+        selected_rows = []
         for row, task in enumerate(tasks):
             gid = task.get("gid", "")
             status = task.get("status", "unknown")
@@ -275,14 +394,22 @@ class FetchDeckWindow(QMainWindow):
                 if column == 0:
                     item.setData(Qt.ItemDataRole.UserRole, gid)
                     item.setData(Qt.ItemDataRole.UserRole + 1, status)
+                    files = task.get("files") or []
+                    path = files[0].get("path", "") if files else ""
+                    item.setData(Qt.ItemDataRole.UserRole + 2, path or task.get("_fetchdeckPath", ""))
                 self.table.setItem(row, column, item)
-            if gid == selected_gid:
-                selected_row = row
+            if gid in selected_gids:
+                selected_rows.append(row)
         self.table.resizeColumnsToContents()
-        if selected_row >= 0:
-            self.table.selectRow(selected_row)
-        else:
-            self._selection_changed()
+        self._apply_filters()
+        selection = self.table.selectionModel()
+        selection.clearSelection()
+        for row in selected_rows:
+            selection.select(
+                self.table.model().index(row, 0),
+                QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+            )
+        self._selection_changed()
 
     def _action_finished(self, _action_id: str, success: bool, message: str) -> None:
         if success:

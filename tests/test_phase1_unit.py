@@ -33,9 +33,10 @@ class FetchDeckUnitTests(unittest.TestCase):
     def test_accepts_http_and_https_links(self):
         self.assertEqual(validate_download_url("  https://example.test/archive.zip  "), "https://example.test/archive.zip")
         self.assertEqual(validate_download_url("http://127.0.0.1:8080/file"), "http://127.0.0.1:8080/file")
+        self.assertEqual(validate_download_url("ftp://example.test/file.zip"), "ftp://example.test/file.zip")
 
     def test_rejects_unsupported_and_credential_bearing_links(self):
-        for url in ("ftp://example.test/file", "magnet:?xt=urn:btih:abc", "https:///missing-host", "https://user:pass@example.test/file"):
+        for url in ("magnet:?xt=urn:btih:abc", "https:///missing-host", "https://user:pass@example.test/file"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 validate_download_url(url)
 

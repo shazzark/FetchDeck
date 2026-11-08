@@ -2,7 +2,7 @@
 
 Status meanings: **NOT STARTED** means no implementation work is underway; **IN PROGRESS** means work is active; **BLOCKED** means a required gate cannot pass yet; **COMPLETE** means acceptance criteria and required gate are verified. Check marks record implementation or checks with observed evidence; a source implementation alone does not pass a real-engine gate.
 
-## Phase 0 â€” Foundation and reference behavior â€” COMPLETE
+## Phase 0 - Foundation and reference behavior - COMPLETE
 
 - [x] Inspect git, branch, workspace, and repository instructions.
 - [x] Audit Motrix GPUI README claims against source code and identify explicit placeholders and Windows-specific code paths.
@@ -17,7 +17,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Local commit:** `7c1d7e1040dcb974a60a00af79a5c93155e32c14` (`feat(foundation): establish Phase 0 app scaffold`).
 
-## Phase 1 — Direct downloads end to end — COMPLETE
+## Phase 1 - Direct downloads end to end - COMPLETE
 
 - [x] Implement an app-owned aria2 child with random RPC secret, loopback binding, request/startup timeouts, session lock, and graceful shutdown.
 - [x] Implement background JSON-RPC polling and a downloads UI for HTTP/HTTPS links, save-folder selection, queue status/progress/speed/errors, pause/resume, and confirmed removal that preserves files by default.
@@ -26,25 +26,29 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 - [x] Pass the real aria2 integration test and verify the finished file hashes on Windows.
 
 **Observed verification:** Installed aria2 with `winget install --id aria2.aria2 --exact`; the executable reports version 1.37.0. `.venv\Scripts\python.exe -m compileall src tests` passed. `.venv\Scripts\python.exe -m unittest discover -s tests -v` ran 8 tests and all passed, including the real aria2 controlled-server test using the app's worker. It observed a waiting job, paused and resumed a live job, verified removal retained its completed file, recorded a controlled 404, and compared both 8 MiB files' SHA-256 values with the server payload. `.venv\Scripts\python.exe -m pip check` reported `No broken requirements found.` The PySide6 app started aria2 1.37.0 under the offscreen backend and shut down its child cleanly; `Get-Process aria2c` returned no process afterward. Real transfer verification used HTTP. HTTPS URL acceptance is covered by unit tests, but a real TLS transfer remains unverified: this aria2 Windows TLS build relies on the Windows trust store, and Windows canceled the test-only CA import (`certutil` exit `0x800704C7`). Certificate verification was not disabled. No manual visual inspection was performed.
-## Phase 2 â€” Session recovery and download controls â€” NOT STARTED
+## Phase 2 - Session recovery and download controls - COMPLETE
 
-- [ ] Persist and restore unfinished/paused work.
-- [ ] Bulk/list controls, restart overwrite handling, and Recycle Bin removal.
-- [ ] FTP and collision-safe resume behavior.
-- [ ] Interrupted-transfer offset/hash and forced-exit gate.
+- [x] Persist unfinished work and deliberately paused tasks, including aria2 control files.
+- [x] Add pause/resume all, status filters, search, multi-select, context menus, restart choices, and confirmed Recycle Bin removal.
+- [x] Add FTP and handle supported REST resume or report when the server rejects it; protect existing restart destinations.
+- [x] Pass graceful-restart offset/hash, paused-state, removal, and forced-exit recovery gate.
 
-**Verification:** Not run. **Blockers:** Phase 1.
+**Verified design evidence:** On Windows aria2 1.37.0, a real paused HTTP job written by `saveSession` produced a session entry containing `pause=true`, retained its `.aria2` control file, and kept its partial output in the configured download folder. This confirms deliberate pause persistence for aria2 input-file recovery. The [aria2 1.37.0 manual](https://aria2.github.io/manual/en/html/aria2c.html) documents that `--save-session` output can be used as `--input-file` on restart and that `--auto-save-interval` writes control files during a download.
 
-## Phase 3 â€” Torrents and tracker management â€” NOT STARTED
+**Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. With aria2 1.37.0 on Windows, `.venv\Scripts\python.exe -m unittest discover -s tests -v` ran 18 tests in 82.442 seconds; all passed. The real-engine cases verified HTTP graceful restart and paused-state restoration with a nonzero Range offset and SHA-256 match; forced aria2 termination after a control-file checkpoint, followed by offset-based recovery and matching SHA-256; FTP transfer and REST resume with a matching SHA-256; a no-REST FTP server reporting that it cannot resume; explicit restart keep-both and replace choices; and pause-all/resume-all over two queued HTTP tasks. The earlier Phase 1 real-engine case also verified queueing, per-task pause/resume, file-preserving removal, and a controlled 404. Two UI tests verified startup failure display, persistent multiselection across polling snapshots, and status filtering. Two unit tests cover unique restart destinations and the Windows Recycle Bin shell-operation flags/error path (shell API mocked; no real file was moved). `.venv\Scripts\python.exe -m pip check` reported no broken requirements. Actual PySide6 startup showed aria2 1.37.0 ready and graceful window close stopped its worker. The process query returned no aria2c process. After the final session destination fallback edit, compileall passed again; the 5 Phase 2 unit/UI tests and the real aria2 collision-restart integration test all passed. No manual visual inspection or real Recycle Bin movement was performed.
+
+
+
+## Phase 3 - Torrents and tracker management - NOT STARTED
 
 - [ ] Magnet and `.torrent` workflows.
 - [ ] Licensed tracker list and resilient sync/apply behavior.
 - [ ] DHT/PEX/seeding defaults and scope documented.
 - [ ] Real lawful torrent/magnet, hash, seeding, pause, and sync success/failure gate.
 
-**Verification:** Not run. **Blockers:** Phase 2 and licensing review.
+**Verification:** Not run. **Blockers:** Phase 2 is complete; tracker redistribution review and the lawful controlled torrent/magnet seeder gate are prerequisites.
 
-## Phase 4 â€” Settings, notifications, and desktop polish â€” NOT STARTED
+## Phase 4 - Settings, notifications, and desktop polish - NOT STARTED
 
 - [ ] Persistent settings and engine/UI effects.
 - [ ] Completion/failure feed and native Windows notifications.
@@ -53,7 +57,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Verification:** Not run. **Blockers:** Phase 3.
 
-## Phase 5 â€” Local Next.js and TypeScript dashboard â€” NOT STARTED
+## Phase 5 - Local Next.js and TypeScript dashboard - NOT STARTED
 
 - [ ] Optional static dashboard, safe versioned read-only API, and same-origin server.
 - [ ] Live and historical stats with restart-safe accounting.
@@ -61,7 +65,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Verification:** Not run. Node setup intentionally deferred. **Blockers:** Phase 4.
 
-## Phase 6 â€” Windows packaging and release readiness â€” NOT STARTED
+## Phase 6 - Windows packaging and release readiness - NOT STARTED
 
 - [ ] Verify redistribution terms and choose aria2 packaging strategy.
 - [ ] Reproducible Windows package with dashboard assets and notices.
