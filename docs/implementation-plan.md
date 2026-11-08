@@ -69,11 +69,11 @@ Inspected the public `missuo/motrix-gpui` source at commit `a26c3a9116375b45d941
 - **Acceptance criteria:** Dashboard remains optional; local API exposes only safe statistics; host/origin boundaries are enforced; static export opens from the desktop app; restored bytes are not double-counted.
 - **Verification:** Dashboard lint, type check, production build; open production dashboard during real download; observe live changes and persisted totals; verify empty/disconnected cases.
 
-## Phase 6 — Windows packaging and release readiness
+## Phase 6 - Windows packaging and release readiness
 
-- **Goal:** Prepare a reproducible, self-contained Windows release and user documentation.
-- **Scope:** Windows package and installer; verified aria2 redistribution decision; third-party notices; include static dashboard output; clean-machine install/launch; upgrade data preservation; child-process cleanup; supported feature/limit/troubleshooting/use documentation; local artifacts.
-- **Exclusions:** Publishing or pushing artifacts without explicit request; future integrations.
-- **Dependencies:** Phases 0–5 complete; clean Windows verification environment; verified licenses and packaging toolchain.
-- **Acceptance criteria:** End user needs neither Python nor Node; package features and data upgrades work; no aria2 child remains after exit; docs match shipped behavior.
-- **Verification:** Clean Windows install and full manual exercise of downloads, recovery, torrents, notifications, dashboard, upgrade preservation, and process cleanup. Record Windows evidence separately from automated checks.
+- **Goal:** Prepare a reproducible Windows desktop package and user documentation.
+- **Scope:** One-folder Windows application package and portable archive; verified third-party notices; external aria2 installation instructions; clean-machine launch and supported workflows; upgrade data preservation; child-process cleanup; supported-feature, limits, troubleshooting, and usage documentation; local artifacts. The dashboard is deferred with Phase 5.
+- **Exclusions:** Dashboard assets, publishing or pushing artifacts without explicit request, plugins, browser integration, and CLI integration.
+- **Dependencies:** Phases 0-4 complete; Phase 5 is deferred and not a dependency; Windows packaging toolchain and a clean Windows verification environment. aria2 remains separately installed because its official repository identifies it as GPL-2.0; FetchDeck will not bundle it in this release. PySide6/Qt libraries require applicable LGPL/GPL notices and replacement rights to be preserved in the one-folder package.
+- **Acceptance criteria:** End users need neither Python nor Node; aria2 prerequisites are explicit; package startup, workflows, data preservation, and child cleanup are verified; notices and docs match the package.
+- **Verification:** Build on Windows, launch the package with the host Python unavailable, exercise supported downloads and recovery with an installed aria2, test an upgrade against existing app data, and verify no child remains after exit. Record current-machine and clean-machine evidence separately. See the [aria2 license](https://github.com/aria2/aria2), [Qt for Python licenses](https://doc.qt.io/qtforpython-6.8/licenses.html), [Qt LGPL/GPL overview](https://doc.qt.io/qt-6.10/licensing.html), and [PyInstaller bootloader exception](https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt).
