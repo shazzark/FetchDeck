@@ -1,0 +1,5 @@
+@import "tailwindcss";
+/* Mirror packages/brand-ui/src/tokens.css; local tokens avoid a Windows Turbopack root mismatch. */
+:root{--fd-ink:#101f2b;--fd-night:#0a1720;--fd-panel:#132531;--fd-panel-soft:#1a303d;--fd-line:#2c414c;--fd-text:#f5f7f4;--fd-muted:#9fb0b6;--fd-lime:#c6f36a;--fd-blue:#68c9e8;--fd-orange:#ff9f68;--fd-font:Arial,Helvetica,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--fd-night);color:var(--fd-text);font-family:var(--fd-font)}
+.fd-wordmark{display:inline-flex;align-items:center;gap:.65rem;font-weight:750;letter-spacing:-.04em}.fd-mark{width:2.25rem;height:2.25rem}.panel{background:var(--fd-panel);border:1px solid var(--fd-line);border-radius:1.2rem}.muted{color:var(--fd-muted)}

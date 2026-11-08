@@ -1,0 +1,10 @@
+{
+  "name": "fetchdeck-web",
+  "private": true,
+  "workspaces": ["apps/dashboard", "apps/website", "packages/brand-ui"],
+  "scripts": {
+    "lint": "npm run lint --workspace @fetchdeck/dashboard && npm run lint --workspace @fetchdeck/website",
+    "typecheck": "npm run typecheck --workspace @fetchdeck/dashboard && npm run typecheck --workspace @fetchdeck/website",
+    "build": "npm run build --workspace @fetchdeck/dashboard && npm run build --workspace @fetchdeck/website"
+  }
+}

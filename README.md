@@ -1,6 +1,6 @@
 # FetchDeck
 
-FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 4 are complete, including user-confirmed Windows completion/failure notifications and the active-download quit warning. See [the implementation plan](docs/implementation-plan.md).
+FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 5 are complete, including user-confirmed Windows notifications, a local statistics dashboard, and a separate public website. See [the implementation plan](docs/implementation-plan.md).
 
 ## Development setup (Windows PowerShell)
 
@@ -24,4 +24,18 @@ If PowerShell blocks activation, use `Set-ExecutionPolicy -Scope Process -Execut
 
 Run `python -m compileall src tests` for a Python syntax check and `python -m unittest discover -s tests -v` for the current test suite. The controlled-server aria2 integration test is skipped when aria2c is missing; a skip does not pass the Phase 1 real-engine gate. `python -m fetchdeck` opens the PySide6 window.
 
-The Downloads screen supports HTTP, HTTPS, FTP, magnets, and `.torrent` files, pause/resume, queue controls, session recovery, status filtering, search, multi-select, restart collision choices, and confirmed Recycle Bin moves. Deliberately paused tasks stay paused after restart. Tracker lists sync at runtime and are not bundled. Settings persist locally; concurrency and per-task connections apply after restart, while speed limits and User-Agent apply immediately. The in-app completion/failure feed is implemented. A user-confirmed Windows "Download complete" banner was shown for a completed HTTPS transfer; the active-download quit and resume check is pending. The Next.js dashboard (Phase 5) is deferred to a future release.
+The Downloads screen supports HTTP, HTTPS, FTP, magnets, and `.torrent` files, pause/resume, queue controls, session recovery, status filtering, search, multi-select, restart collision choices, and confirmed Recycle Bin moves. Deliberately paused tasks stay paused after restart. Tracker lists sync at runtime and are not bundled. Settings persist locally; concurrency and per-task connections apply after restart, while speed limits and User-Agent apply immediately. The in-app completion/failure feed is implemented. The user confirmed Windows completion and failure notifications and the active-download quit warning; the Phase 2 server log verified resume from a nonzero byte range. Phase 5 builds the local dashboard and a separate public site; neither is deployed by this workflow.
+
+## Dashboard and public site
+
+Node.js 22 and npm are build tools for two separate Next.js 16 static exports. The desktop app remains usable without Node or the dashboard. To build either site, run these commands from the repository root:
+
+```powershell
+npm ci
+npm run lint
+npm run typecheck
+npm run build --workspace @fetchdeck/dashboard
+npm run build --workspace @fetchdeck/website
+```
+
+The dashboard export is written to `apps/dashboard/out`; the desktop **Dashboard** button serves that folder with a read-only API on `127.0.0.1` while the local page is open. The public website export is written separately to `apps/website/out`. It has no configured canonical domain yet. When a public domain is selected, set `$env:NEXT_PUBLIC_SITE_URL='https://your-domain.example'` before building to add canonical and absolute Open Graph/Twitter preview URLs. The branded preview image is `apps/website/public/og-image.png`. The Windows installer action remains disabled until a verified package has a public URL.

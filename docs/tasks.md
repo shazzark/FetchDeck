@@ -66,21 +66,36 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Phase 4 implementation checkpoint:** `299e59788fb72b2ec06c597547911331aa4886c5` (`feat(settings): add Phase 4 preferences and notifications`).
 
-**Phase 4 completion commit:** Pending.
+**Phase 4 completion commit:** `248a66be1345ea78b275b173967509650682461c` (`docs(phase4): close manual Windows verification gate`).
 
-## Phase 5 - Local Next.js and TypeScript dashboard - NOT STARTED
+## Phase 5 - Local dashboard and public website - COMPLETE
 
-**Disposition:** Deferred to a future release by user request; Phase 6 does not depend on it.
+- [x] Build independently buildable strict-TypeScript Next.js App Router dashboard and public website as separate static exports.
+- [x] Apply FetchDeck brand colors, logo, typography, Lucide icons, and Tailwind CSS to both apps; share the reusable wordmark component.
+- [x] Serve the dashboard export and versioned, read-only stats API from one loopback Python origin; launch it from the desktop Dashboard button.
+- [x] Derive live rates/counts from aria2 and persist daily activity with per-task byte checkpoints.
+- [x] Build the public landing page, features, genuine desktop/dashboard screenshots, Windows setup, favicon/title/description, branded PNG Open Graph asset, and disabled unpublished-installer button.
+- [x] Run lint, strict type checks, and independent production builds; inspect both production pages in desktop and mobile browser sizes; verify assets, API privacy/security, disconnected state, real transfer, and totals after restart.
 
-- [ ] Static dashboard, safe versioned read-only API, same-origin server, and dashboard checks (future release).
+**Observed verification:** Node 22.13.0 and npm 11.1.0. `npm install` added 404 packages; the lockfile is committed for reproducible `npm ci`. `npm run lint` passed for both workspaces; `npm run typecheck` passed in strict mode for both. `npm run build --workspace @fetchdeck/dashboard` and `npm run build --workspace @fetchdeck/website` each produced independent static exports. An elevated `npm audit` reported 10 moderate findings in the development dependency chain, including a `minimatch` glob-pattern denial-of-service advisory pulled in through ESLint. `npm audit fix` did not resolve it; `npm audit fix --force` proposed downgrading ESLint 10 to ESLint 9, so that breaking change was not applied. A later audit retry could not reach npm's advisory endpoint.
 
-**Verification:** Not started. Node setup deferred. Not a Phase 6 dependency.
+Python checks: `.venv\Scripts\python.exe -m compileall src tests` passed. The Windows suite ran 32 tests in 107.562 seconds, including the real aria2 HTTP, FTP, torrent, resume, and task-control cases; all passed and `.venv\Scripts\python.exe -m pip check` reported no broken requirements. The added desktop Dashboard-button smoke test separately passed: it started a temporary same-origin server and verified `QDesktopServices.openUrl` receives its loopback URL.
 
-## Phase 6 - Windows packaging and release readiness - IN PROGRESS
+Real dashboard browser check: the production export was served with `DashboardServer` while aria2 1.37.0 downloaded the controlled 8 MiB byte-range test file. Playwright observed the live rate (about 256 KB/s), one active job, changing daily total, and successful JS/CSS/favicon/API requests with no console errors. Persisted activity held exactly 8,388,608 bytes after the engine/app-data restart and before a second download; after a second real 8 MiB transfer it was 16,777,216 bytes. This shows the prior transfer was retained once and only new bytes were added. The actual app screenshot shows the running aria2 task; the dashboard screenshot shows the live rate and transfer total. A separate production static-server view without the API displayed the designed disconnected message and zero-value state.
 
-- [ ] Build a reproducible one-folder Windows package and portable archive; defer dashboard assets with Phase 5.
-- [ ] Include applicable third-party notices and document aria2 as an external runtime dependency.
-- [ ] Verify launch without host Python, real aria2 workflows, app-data upgrade preservation, and child-process cleanup.
-- [ ] Update supported-feature, troubleshooting, and usage documentation; create local release artifacts.
+API contract/security tests passed: statistics expose only aggregate fields; URL, file path, and GID sentinels were absent. Wrong Host returned HTTP 400, foreign Origin returned HTTP 403, and POST returned HTTP 405. The same-origin API is read-only and sends no permissive CORS headers.
 
-**Preparation:** Phase 4 is complete. PyInstaller 6.22.3 is installed in `.venv`; Phase 6 build is underway. Packaging research found aria2 is GPL-2.0, PySide6/Qt use LGPL/GPL and include third-party notices, and PyInstaller has a bootloader exception. The package keeps aria2 external and must preserve applicable Qt notices and replaceable shared libraries. Phase 5 is deferred and is not a dependency. A separate clean Windows machine is not available in this workspace.
+Public-site browser check: the production export rendered at desktop and 390-pixel mobile width; the mobile document width was 375 px with no horizontal page overflow. All 14 visible SVG icons rendered; the only button is a text-labeled, disabled installer action. The desktop and dashboard PNG screenshots loaded (both image elements and their static files returned HTTP 200). The FetchDeck SVG favicon returned HTTP 200 and the 1200x630 branded PNG Open Graph asset returned `image/png`/HTTP 200. No public domain has been chosen, so canonical and absolute social preview metadata remain unset; `NEXT_PUBLIC_SITE_URL` configures them at the domain-specific build. The installer button remains disabled because Phase 6 packaging is not yet verified and no public URL exists.
+
+**Local commit:** pending final diff review.
+
+**Dependencies:** Phase 4 complete. Phase 6 packaging must include `apps/dashboard/out`; the public website remains a separate export and has not been deployed.
+
+## Phase 6 - Windows packaging and release readiness - NOT STARTED
+
+- [ ] Build a reproducible Windows package with the Phase 5 dashboard static export and third-party notices.
+- [ ] Document aria2 as an external runtime dependency unless redistribution obligations are addressed.
+- [ ] Verify launch without host Python or Node, real supported workflows, app-data upgrades, and child-process cleanup.
+- [ ] Update supported-feature, troubleshooting, usage docs, and create local release artifacts.
+
+**Verification:** PyInstaller 6.22.3 is installed in `.venv`; no package has been built. **Dependencies:** Phase 5 production dashboard export and clean Windows verification environment. Public site is separately deployable and is not part of the desktop package.

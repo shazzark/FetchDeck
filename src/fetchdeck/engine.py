@@ -24,6 +24,7 @@ from PySide6.QtCore import QThread, Signal
 from .filesystem import move_to_recycle_bin
 from .paths import AppPaths
 from .preferences import Preferences
+from .statistics import StatisticsStore
 from .trackers import TrackerError, TrackerListStore
 
 
@@ -336,6 +337,8 @@ class EngineWorker(QThread):
         self._task_destinations: dict[str, tuple[Path, str]] = {}
         self._task_sources: dict[str, str] = {}
         self._daemon: Aria2Daemon | None = None
+        self.statistics = StatisticsStore(paths.activity)
+        self._fresh_gids: set[str] = set()
 
     def submit(self, name: str, *args: Any) -> str:
         action_id = uuid.uuid4().hex
@@ -416,6 +419,7 @@ class EngineWorker(QThread):
             gid = str(rpc.call("addUri", [[url], {"dir": str(folder)}]))
             self._task_destinations[gid] = (Path(folder), output_name_for_uri(url))
             self._task_sources[gid] = url
+            self._fresh_gids.add(gid)
             return gid
         elif name == "add_magnet":
             magnet, folder = args
@@ -424,6 +428,7 @@ class EngineWorker(QThread):
             gid = str(rpc.call("addUri", [[magnet], {"dir": str(folder)}]))
             self._task_destinations[gid] = (Path(folder), output_name_for_uri(magnet))
             self._task_sources[gid] = magnet
+            self._fresh_gids.add(gid)
             return gid
         elif name == "add_torrent":
             torrent_path, folder = args
@@ -435,6 +440,7 @@ class EngineWorker(QThread):
                 raise EngineError("Choose a non-empty .torrent file smaller than 16 MiB.")
             gid = str(rpc.call("addTorrent", [base64.b64encode(torrent_bytes).decode("ascii"), [], {"dir": str(folder)}]))
             self._task_destinations[gid] = (Path(folder), "")
+            self._fresh_gids.add(gid)
             return gid
         elif name == "pause":
             try:
@@ -513,6 +519,7 @@ class EngineWorker(QThread):
             )
             self._task_destinations[str(new_gid)] = (folder, out)
             self._task_sources[str(new_gid)] = uri
+            self._fresh_gids.add(str(new_gid))
             self._task_destinations.pop(gid, None)
             self._task_sources.pop(gid, None)
             return str(new_gid)
@@ -544,6 +551,7 @@ class EngineWorker(QThread):
             "status",
             "totalLength",
             "completedLength",
+            "uploadLength",
             "downloadSpeed",
             "uploadSpeed",
             "seeder",
@@ -559,6 +567,8 @@ class EngineWorker(QThread):
         tasks.extend(rpc.call("tellActive", [keys]))
         tasks.extend(rpc.call("tellWaiting", [0, 1000, keys]))
         tasks.extend(rpc.call("tellStopped", [0, 1000, keys]))
+        self.statistics.observe(tasks, fresh_gids=self._fresh_gids)
+        self._fresh_gids.difference_update(str(task.get("gid", "")) for task in tasks)
         for task in tasks:
             files = task.get("files") or []
             path = files[0].get("path", "") if files else ""

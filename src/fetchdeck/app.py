@@ -4,8 +4,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from typing import Any
 
-from PySide6.QtCore import QItemSelectionModel, Qt
-from PySide6.QtGui import QShortcut
+from PySide6.QtCore import QItemSelectionModel, QUrl, Qt
+from PySide6.QtGui import QDesktopServices, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from .engine import EngineWorker, is_magnet_uri
+from .dashboard_server import DashboardServer
 from .notifications import NotificationStore
 from .paths import AppPaths
 from .preferences import Preferences, PreferencesStore, validate_preferences
@@ -167,6 +168,9 @@ class FetchDeckWindow(QMainWindow):
         self._known_task_status: dict[str, str] = {}
         self._has_snapshot = False
         self._latest_tasks: list[dict[str, Any]] = []
+        self._engine_version = ""
+        self._engine_health = "starting"
+        self.dashboard_server: DashboardServer | None = None
         self._engine_preferences = self.preferences
         self.tracker_store = TrackerListStore(self.paths.trackers)
         self.tracker_sync_worker: TrackerSyncWorker | None = None
@@ -385,6 +389,8 @@ class FetchDeckWindow(QMainWindow):
 
         toolbar = QHBoxLayout()
         self.add_button = QPushButton("Add download")
+        self.dashboard_button = QPushButton("Dashboard")
+        self.dashboard_button.clicked.connect(self._open_dashboard)
         self.add_torrent_button = QPushButton("Add .torrent")
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
@@ -416,6 +422,7 @@ class FetchDeckWindow(QMainWindow):
         self.resume_all_button.clicked.connect(lambda: self.worker.submit("resume_all"))
         for button in (
             self.add_button,
+            self.dashboard_button,
             self.add_torrent_button,
             self.pause_button,
             self.resume_button,
@@ -467,6 +474,8 @@ class FetchDeckWindow(QMainWindow):
         return page
 
     def _engine_ready(self, version: str) -> None:
+        self._engine_version = version
+        self._engine_health = "running"
         self.engine_status.setText(f"aria2 {version} is running.")
         self.add_button.setEnabled(True)
         self.add_torrent_button.setEnabled(True)
@@ -474,6 +483,7 @@ class FetchDeckWindow(QMainWindow):
         self.resume_all_button.setEnabled(True)
 
     def _engine_error(self, message: str) -> None:
+        self._engine_health = "unavailable"
         self.engine_status.setText(f"Engine unavailable: {message}")
         self.add_button.setEnabled(False)
         self.add_torrent_button.setEnabled(False)
@@ -678,6 +688,7 @@ class FetchDeckWindow(QMainWindow):
         self._known_task_status = current_status
         self._has_snapshot = True
         self._latest_tasks = tasks
+        self._engine_health = "running"
         self.downloads_state.setText(
             "No downloads yet. Add a link or a .torrent file to get started."
             if not tasks else "No downloads match the current search and filter."
@@ -755,6 +766,35 @@ class FetchDeckWindow(QMainWindow):
         for event in reversed(self.notification_events[-100:]):
             self.notification_feed.addItem(f"{event['time']}  {event['title']} — {event['detail']}")
 
+    def _open_dashboard(self) -> None:
+        if self.dashboard_server is None:
+            candidates = [
+                Path(sys.executable).resolve().parent / "dashboard",
+                Path(__file__).resolve().parents[2] / "apps" / "dashboard" / "out",
+            ]
+            export_dir = next((path for path in candidates if (path / "index.html").is_file()), None)
+            if export_dir is None:
+                QMessageBox.information(self, "Dashboard unavailable", "Build the optional dashboard with npm run build --workspace @fetchdeck/dashboard, then restart FetchDeck.")
+                return
+            self.dashboard_server = DashboardServer(export_dir, self._dashboard_snapshot)
+        try:
+            address = getattr(self.dashboard_server, "address", None)
+            if address is None:
+                address = self.dashboard_server.start()
+                self.dashboard_server.address = address
+        except OSError as exc:
+            QMessageBox.warning(self, "Dashboard unavailable", f"FetchDeck could not start the local dashboard server: {exc}")
+            self.dashboard_server = None
+            return
+        QDesktopServices.openUrl(QUrl(address))
+
+    def _dashboard_snapshot(self) -> dict[str, Any]:
+        return self.worker.statistics.snapshot(
+            engine_status=self._engine_health,
+            engine_version=self._engine_version,
+            tasks=self._latest_tasks,
+        )
+
     def _action_finished(self, _action_id: str, success: bool, message: str) -> None:
         if success:
             self.statusBar().showMessage("Download updated.", 3000)
@@ -784,6 +824,8 @@ class FetchDeckWindow(QMainWindow):
             self.engine_status.setText("aria2 is still shutting down. Try closing FetchDeck again.")
             event.ignore()
             return
+        if self.dashboard_server is not None:
+            self.dashboard_server.close()
         event.accept()
 
 

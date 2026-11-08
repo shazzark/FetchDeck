@@ -4,12 +4,14 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import urlopen
 
 from PySide6.QtCore import QEventLoop, QItemSelectionModel, QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QMessageBox
 
 from fetchdeck.app import FetchDeckWindow
+from fetchdeck.dashboard_server import DashboardServer
 from fetchdeck.engine import EngineError
 from fetchdeck.preferences import Preferences
 
@@ -44,6 +46,32 @@ class EngineUnavailableUiTests(unittest.TestCase):
                 timer.stop()
                 self.assertIn("aria2c was not found", window.engine_status.text())
                 self.assertFalse(window.add_button.isEnabled())
+                window.close()
+                self.app.processEvents()
+            finally:
+                if previous_app_data is None:
+                    os.environ.pop("LOCALAPPDATA", None)
+                else:
+                    os.environ["LOCALAPPDATA"] = previous_app_data
+
+    def test_dashboard_button_opens_the_local_server_in_default_browser(self):
+        previous_app_data = os.environ.get("LOCALAPPDATA")
+        with tempfile.TemporaryDirectory(prefix="fetchdeck-ui-dashboard-") as app_data:
+            os.environ["LOCALAPPDATA"] = app_data
+            export = Path(app_data) / "dashboard"
+            export.mkdir()
+            (export / "index.html").write_text("dashboard", encoding="utf-8")
+            try:
+                with patch("fetchdeck.engine.Aria2Daemon.start", side_effect=EngineError("test engine unavailable")):
+                    window = FetchDeckWindow()
+                window.worker.wait(1000)
+                window.dashboard_server = DashboardServer(export, lambda: {"version": 1})
+                with patch("fetchdeck.app.QDesktopServices.openUrl", return_value=True) as open_url:
+                    window.dashboard_button.click()
+                self.assertEqual(open_url.call_count, 1)
+                address = open_url.call_args.args[0].toString()
+                self.assertTrue(address.startswith("http://127.0.0.1:"))
+                self.assertEqual(urlopen(address).read(), b"dashboard")
                 window.close()
                 self.app.processEvents()
             finally:

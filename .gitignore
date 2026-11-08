@@ -10,3 +10,8 @@ venv/
 dist/
 build/
 *.spec
+node_modules/
+apps/*/.next/
+apps/*/out/
+*.tsbuildinfo
+.playwright-mcp/
