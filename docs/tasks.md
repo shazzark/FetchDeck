@@ -50,17 +50,18 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Local commit:** `7ecf19d3a904e5e95fe22d31a717c997bb49f2e3` (`feat(torrents): implement Phase 3 torrent and tracker workflows`).
 
-## Phase 4 - Settings, notifications, and desktop polish - BLOCKED
+## Phase 4 - Settings, notifications, and desktop polish - IN PROGRESS
 
 - [x] Persist the requested settings, reopen the UI from the saved file, and verify engine/UI effects.
 - [x] Add a deduplicated completion/failure feed and Windows tray notification delivery path.
 - [x] Add keyboard shortcuts, theme, empty/loading/error states, and active-work quit warning.
 - [x] Verify aria2 option changes and resume-on-launch behavior with the real engine; exercise the quit prompt response in a UI test.
-- [ ] Observe a real Windows notification and exercise the quit flow with a real active download in the visible desktop.
+- [x] User confirmed the W3C `dummy.pdf` HTTPS transfer completed and Windows displayed the "Download complete" banner.
+- [ ] Exercise the active-download quit warning and verify recovery after reopening with the Phase 2 local server.
 
-**Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. `$env:LOCALAPPDATA='C:\Users\chido\AppData\Local'; .venv\Scripts\python.exe -m unittest discover -s tests -v` ran 29 tests in 102.439 seconds; all passed without skips, including real aria2 1.37.0 checks for startup concurrency/connections, runtime upload/download limits and User-Agent, and `resume_on_launch=false` restoring a saved task paused without sending an HTTP request. UI tests verified preferences remain populated after reopening the window, task transition notifications are persisted and deduplicated, and a simulated No response keeps the active-work quit dialog open. `.venv\Scripts\python.exe -m pip check` reported no broken requirements. Native notification display was not observed: the UI tests use Qt offscreen and cannot confirm Windows notification-center delivery. No manual visible Windows UI inspection was performed.
+**Observed verification:** `.venv\Scripts\python.exe -m compileall src tests` passed. `$env:LOCALAPPDATA='C:\Users\chido\AppData\Local'; .venv\Scripts\python.exe -m unittest discover -s tests -v` ran 29 tests in 102.439 seconds; all passed without skips, including real aria2 1.37.0 checks for startup concurrency/connections, runtime upload/download limits and User-Agent, and `resume_on_launch=false` restoring a saved task paused without sending an HTTP request. UI tests verified preferences remain populated after reopening the window, task transition notifications are persisted and deduplicated, and a simulated No response keeps the active-work quit dialog open. `.venv\Scripts\python.exe -m pip check` reported no broken requirements. User-reported visible Windows check (2026-11-08): W3C `dummy.pdf` completed over HTTPS and the Windows "Download complete" banner appeared. Two Tele2 `10MB.zip` attempts failed with a connection error at 0 B; these are recorded as observed failures, not successful transfer checks. The live manual recovery server reuses `ControlledHandler` from `tests/test_aria2_integration.py`; it serves 8 MiB at 64 KiB chunks with a 0.25-second delay and byte-range support. Range preflight received HTTP 206. Server PID 17196 listens on 127.0.0.1:8765; request log: `%TEMP%\fetchdeck-phase2-http-requests.log`.
 
-**Blocked gate / next action:** On Windows, launch FetchDeck in the visible desktop (not with `QT_QPA_PLATFORM=offscreen`), enable completion notifications in Settings, complete a small real download and confirm the Windows notification appears; then start a throttled download, choose Quit, confirm the warning, relaunch, and confirm the saved job follows the selected resume setting. Record that manual result before marking Phase 4 complete. Phase 5 remains pending.
+**Remaining Phase 4 gate:** With the running server, download `http://127.0.0.1:8765/phase2-resume-test.bin`, wait until transferred bytes are above 0 B, choose Quit, confirm the active-download warning, reopen FetchDeck, and confirm the transfer resumes. After the report, inspect `%TEMP%\fetchdeck-phase2-http-requests.log` for a nonzero `Range=bytes=...` request. Keep Phase 4 IN PROGRESS and Phase 5 pending until then.
 
 **Local checkpoint commit:** `299e59788fb72b2ec06c597547911331aa4886c5` (`feat(settings): add Phase 4 preferences and notifications`).
 
