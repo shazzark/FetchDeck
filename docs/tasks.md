@@ -62,7 +62,7 @@ Status meanings: **NOT STARTED** means no implementation work is underway; **IN 
 
 **Blocked gate / next action:** On Windows, launch FetchDeck in the visible desktop (not with `QT_QPA_PLATFORM=offscreen`), enable completion notifications in Settings, complete a small real download and confirm the Windows notification appears; then start a throttled download, choose Quit, confirm the warning, relaunch, and confirm the saved job follows the selected resume setting. Record that manual result before marking Phase 4 complete. Phase 5 remains pending.
 
-**Local checkpoint commit:** Pending.
+**Local checkpoint commit:** `299e59788fb72b2ec06c597547911331aa4886c5` (`feat(settings): add Phase 4 preferences and notifications`).
 
 ## Phase 5 - Local Next.js and TypeScript dashboard - NOT STARTED
 
