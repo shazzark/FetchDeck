@@ -1,6 +1,6 @@
 # FetchDeck
 
-FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0, 1, and 2 are complete. See [the implementation plan](docs/implementation-plan.md).
+FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 3 are complete. Phase 4 settings and notification workflows are implemented; visible Windows notification and active-download quit verification remain. See [the implementation plan](docs/implementation-plan.md).
 
 ## Development setup (Windows PowerShell)
 
@@ -24,4 +24,4 @@ If PowerShell blocks activation, use `Set-ExecutionPolicy -Scope Process -Execut
 
 Run `python -m compileall src tests` for a Python syntax check and `python -m unittest discover -s tests -v` for the current test suite. The controlled-server aria2 integration test is skipped when aria2c is missing; a skip does not pass the Phase 1 real-engine gate. `python -m fetchdeck` opens the PySide6 window.
 
-The Downloads screen supports HTTP, HTTPS, and FTP links, pause/resume, queue controls, session recovery, status filtering, search, multi-select, restart collision choices, and confirmed Recycle Bin moves. Deliberately paused tasks stay paused after restart. Phase 3 adds torrent and tracker workflows. The dashboard is optional during core development; Node setup remains deferred until Phase 5.
+The Downloads screen supports HTTP, HTTPS, FTP, magnets, and `.torrent` files, pause/resume, queue controls, session recovery, status filtering, search, multi-select, restart collision choices, and confirmed Recycle Bin moves. Deliberately paused tasks stay paused after restart. Tracker lists sync at runtime and are not bundled. Settings persist locally; concurrency and per-task connections apply after restart, while speed limits and User-Agent apply immediately. The in-app completion/failure feed is implemented. Windows tray notification presentation still needs visible desktop verification. The dashboard is optional during core development; Node setup remains deferred until Phase 5.
