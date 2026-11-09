@@ -1,6 +1,6 @@
 # Third-party notices
 
-This local Windows package contains or uses the components below. Review their current license terms and provide any source, notices, relinking, and replacement rights those terms require before distributing a public binary.
+This local Windows package contains or uses the components below. Review their current license terms and provide any source, notices, relinking, and replacement rights those terms require before public ZIP distribution.
 
 | Component | Version | License and notice |
 | --- | --- | --- |

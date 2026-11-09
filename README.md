@@ -1,6 +1,6 @@
 # FetchDeck
 
-FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 5 are complete, including user-confirmed Windows notifications, a local statistics dashboard, and a separate public website. See [the implementation plan](docs/implementation-plan.md).
+FetchDeck is a Windows-first desktop download manager built with Python, PySide6, and aria2. Phases 0 through 5 and the Phase 6 source-code milestone are complete, including user-confirmed Windows notifications, a local statistics dashboard, a separate public website, and a verified local Windows package. See [the implementation plan](docs/implementation-plan.md).
 
 ## Development setup (Windows PowerShell)
 
@@ -40,4 +40,4 @@ npm run build --workspace @fetchdeck/website
 
 The dashboard export is written to `apps/dashboard/out`; the desktop **Dashboard** button serves that folder with a read-only API on `127.0.0.1` while the local page is open. The public website export is written separately to `apps/website/out`. It has no configured canonical domain yet. When a public domain is selected, set `$env:NEXT_PUBLIC_SITE_URL='https://your-domain.example'` before building to add canonical and absolute Open Graph/Twitter preview URLs. The branded preview image is `apps/website/public/og-image.png`. The Windows installer action remains disabled until a verified package has a public URL.
 
-Windows package build instructions are in [docs/packaging.md](docs/packaging.md). The user guide is [docs/using-fetchdeck.md](docs/using-fetchdeck.md); license review items are in [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md).
+Windows package build instructions are in [docs/packaging.md](docs/packaging.md). The user guide is [docs/using-fetchdeck.md](docs/using-fetchdeck.md); public ZIP redistribution review items are in [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md).

@@ -22,8 +22,8 @@ Install aria2 with WinGet (`winget install --id aria2.aria2 --exact`) or another
 
 ## License and release status
 
-The package contains PySide6/Qt and PyInstaller notices in `THIRD-PARTY-NOTICES.md` and `licenses`. aria2 is not bundled because it is GPL-2.0 and would add redistribution obligations. Qt for Python is available under LGPLv3/GPLv3 community terms or commercial terms. Before publishing this package, review the applicable Qt terms, the shared-library replacement requirements for a PyInstaller bundle, and third-party notices for all dashboard npm assets. The repository's `docs/THIRD-PARTY-NOTICES.md` identifies the current review items.
+The package contains PySide6/Qt and PyInstaller notices in `THIRD-PARTY-NOTICES.md` and `licenses`. aria2 is not bundled because it is GPL-2.0 and would add redistribution obligations. Qt for Python is available under LGPLv3/GPLv3 community terms or commercial terms. Before public ZIP distribution, review the applicable Qt terms, the shared-library replacement requirements for a PyInstaller bundle, and third-party notices for all dashboard npm assets. The repository's `docs/THIRD-PARTY-NOTICES.md` identifies the current review items.
 
-## Verification limits
+## Verified Windows package checks
 
-The development Windows machine can verify package launch, dashboard serving, and aria2 workflows. A clean Windows environment is needed to prove installation without host Python/Node, app-data upgrade behavior, and absence of undeclared runtime dependencies. Record that environment's results separately before calling a public release ready.
+The source-code milestone has verified package launch with Python and Node absent from `PATH`, a controlled local HTTP download with matching SHA-256, dashboard page and stats API serving from loopback, and aria2 child cleanup on graceful app close. See `docs/tasks.md` for the recorded results.
